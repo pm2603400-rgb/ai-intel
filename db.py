@@ -31,6 +31,7 @@ def init_db():
                 run_date    TEXT NOT NULL,
                 pub_date    TEXT,
                 source      TEXT NOT NULL,
+                category    TEXT,
                 title       TEXT,
                 title_zh    TEXT,
                 source_url  TEXT,
@@ -42,6 +43,7 @@ def init_db():
         """)
         _ensure_column(conn, "pub_date", "TEXT")
         _ensure_column(conn, "title_zh", "TEXT")
+        _ensure_column(conn, "category", "TEXT")
 
 
 def already_have(source, title):
@@ -54,14 +56,14 @@ def already_have(source, title):
 
 
 def save_report(run_date, pub_date, source, title, title_zh,
-                source_url, summary_md, skill_md):
+                source_url, summary_md, skill_md, category="一般資訊"):
     with get_conn() as conn:
         conn.execute("""
             INSERT OR IGNORE INTO reports
-            (run_date, pub_date, source, title, title_zh,
+            (run_date, pub_date, source, category, title, title_zh,
              source_url, summary_md, skill_md)
-            VALUES (?,?,?,?,?,?,?,?)
-        """, (run_date, pub_date, source, title, title_zh,
+            VALUES (?,?,?,?,?,?,?,?,?)
+        """, (run_date, pub_date, source, category, title, title_zh,
               source_url, summary_md, skill_md))
 
 
@@ -89,16 +91,27 @@ def list_sources():
         return [r["source"] for r in rows]
 
 
+def list_categories():
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT category FROM reports "
+            "WHERE category IS NOT NULL AND category != '' ORDER BY category"
+        ).fetchall()
+        return [r["category"] for r in rows]
+
+
 _ORDER = " ORDER BY COALESCE(pub_date, run_date) DESC, created_at DESC"
 
 
-def query_reports(pub_date=None, source=None):
+def query_reports(pub_date=None, source=None, category=None):
     sql = "SELECT * FROM reports WHERE 1=1"
     params = []
     if pub_date and pub_date != "全部":
         sql += " AND pub_date=?"; params.append(pub_date)
     if source and source != "全部":
         sql += " AND source=?"; params.append(source)
+    if category and category != "全部":
+        sql += " AND category=?"; params.append(category)
     sql += _ORDER
     with get_conn() as conn:
         return conn.execute(sql, params).fetchall()
@@ -107,13 +120,14 @@ def query_reports(pub_date=None, source=None):
 def search_reports(keyword):
     kw = f"%{keyword}%"
     sql = ("SELECT * FROM reports WHERE "
-           "(title LIKE ? OR title_zh LIKE ? OR summary_md LIKE ? OR skill_md LIKE ?)"
+           "(title LIKE ? OR title_zh LIKE ? OR summary_md LIKE ? "
+           "OR skill_md LIKE ? OR category LIKE ?)"
            + _ORDER)
     with get_conn() as conn:
-        return conn.execute(sql, [kw, kw, kw, kw]).fetchall()
+        return conn.execute(sql, [kw, kw, kw, kw, kw]).fetchall()
 
 
-def query_all_skills(pub_date=None, source=None):
+def query_all_skills(pub_date=None, source=None, category=None):
     sql = ("SELECT * FROM reports WHERE skill_md IS NOT NULL AND skill_md != '' "
            "AND skill_md NOT LIKE '%一般性資訊%'")
     params = []
@@ -121,6 +135,8 @@ def query_all_skills(pub_date=None, source=None):
         sql += " AND pub_date=?"; params.append(pub_date)
     if source and source != "全部":
         sql += " AND source=?"; params.append(source)
+    if category and category != "全部":
+        sql += " AND category=?"; params.append(category)
     sql += _ORDER
     with get_conn() as conn:
         return conn.execute(sql, params).fetchall()
