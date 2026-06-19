@@ -13,7 +13,7 @@ import db
 load_dotenv()
 genai.configure(api_key=os.environ["GEMINI_API_KEY"])
 
-MODEL = "gemini-2.5-pro"    # 試用 Pro（最強）。若免費額度跳付費錯誤，改回 "gemini-2.5-flash"
+MODEL = "gemini-2.5-flash"  # 完整版 Flash（確定免費、比 flash-lite 聰明）。Pro 已需付費故不用。
 HEADERS = {"User-Agent": "Mozilla/5.0 (AI-Intel-Bot)"}
 FETCH_PER_SOURCE = 25       # 每來源從 RSS 抓幾篇候選（含舊的，靠增量過濾）
 DAILY_LIMIT = 20            # 每天最多送進 Gemini 幾篇（免費額度上限，用滿）
