@@ -1,4 +1,5 @@
 import os
+import re
 import datetime
 import time
 import requests
@@ -32,7 +33,69 @@ RSS_SOURCES = {
 }
 
 
-def _parse_pub_date(entry):
+def _extract_arxiv_id(link, title):
+    """從連結或標題抓出 arXiv 編號，如 2606.19464。抓不到回 None。"""
+    m = re.search(r"(\d{4}\.\d{4,5})", f"{link} {title}")
+    return m.group(1) if m else None
+
+
+def _arxiv_date_from_id(arxiv_id):
+    """從編號前 4 碼推年月（YYMM），回該月 1 日。當 API 失敗時的備援。"""
+    if not arxiv_id:
+        return None
+    yy, mm = arxiv_id[:2], arxiv_id[2:4]
+    try:
+        year, month = 2000 + int(yy), int(mm)
+        if 1 <= month <= 12:
+            return f"{year:04d}-{month:02d}-01"
+    except Exception:
+        pass
+    return None
+
+
+_arxiv_date_cache = {}
+
+
+def _arxiv_exact_date(arxiv_id):
+    """用 arXiv 官方 API 查論文「首次提交日」（精確到日）。
+    成功回 YYYY-MM-DD；失敗回 None（呼叫端會退回年月）。"""
+    if not arxiv_id:
+        return None
+    if arxiv_id in _arxiv_date_cache:
+        return _arxiv_date_cache[arxiv_id]
+    result = None
+    try:
+        url = f"http://export.arxiv.org/api/query?id_list={arxiv_id}"
+        r = requests.get(url, headers=HEADERS, timeout=20)
+        if r.status_code == 200:
+            # API 回傳 Atom XML，第一個 <published> 是首次提交日
+            m = re.search(r"<published>(\d{4}-\d{2}-\d{2})", r.text)
+            if m:
+                result = m.group(1)
+        time.sleep(1)  # 對 arXiv API 友善，避免太頻繁
+    except Exception:
+        result = None
+    _arxiv_date_cache[arxiv_id] = result
+    return result
+
+
+def _parse_pub_date(entry, source_name=""):
+    link = entry.get("link", "")
+    title = entry.get("title", "")
+    # arXiv：RSS 的 published 是「feed 產生日」不可靠。三層防護取真正提交日：
+    #   1) 官方 API 查精確提交日（精確到日）
+    #   2) 失敗則用編號推年月
+    #   3) 再失敗回 None（最後由呼叫端退回執行日）
+    if "arXiv" in source_name:
+        aid = _extract_arxiv_id(link, title)
+        if aid:
+            exact = _arxiv_exact_date(aid)
+            if exact:
+                return exact
+            approx = _arxiv_date_from_id(aid)
+            if approx:
+                return approx
+    # 其他來源：RSS 的 published / updated 通常準確
     t = entry.get("published_parsed") or entry.get("updated_parsed")
     if t:
         try:
@@ -52,7 +115,7 @@ def fetch_rss(name, url):
             "title": entry.get("title", "(無標題)").strip(),
             "link": entry.get("link", ""),
             "text": text[:TEXT_LIMIT],
-            "pub_date": _parse_pub_date(entry),
+            "pub_date": _parse_pub_date(entry, name),
         })
     return items
 
