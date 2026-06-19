@@ -13,12 +13,22 @@ import db
 load_dotenv()
 genai.configure(api_key=os.environ["GEMINI_API_KEY"])
 
-MODEL = "gemini-2.5-flash-lite"
+MODEL = "gemini-2.5-pro"    # 試用 Pro（最強）。若免費額度跳付費錯誤，改回 "gemini-2.5-flash"
 HEADERS = {"User-Agent": "Mozilla/5.0 (AI-Intel-Bot)"}
 FETCH_PER_SOURCE = 25       # 每來源從 RSS 抓幾篇候選（含舊的，靠增量過濾）
 DAILY_LIMIT = 20            # 每天最多送進 Gemini 幾篇（免費額度上限，用滿）
 TEXT_LIMIT = 6000
 SLEEP_SECONDS = 5           # 每篇間隔（避開每分鐘限制）
+
+# 文章分類（Gemini 會從中擇一標註；網站可依此篩選）
+CATEGORIES = [
+    "模型發布",   # 新模型、新版本、權重釋出
+    "研究論文",   # 學術成果、arXiv、技術報告
+    "工具與技巧", # 可操作的方法、實用技術、開發技巧
+    "產業動態",   # 公司、政策、市場、募資、合作
+    "應用案例",   # 實際落地、產品、整合應用
+    "一般資訊",   # 其他不易歸類者
+]
 
 # RSS 來源（Meta 因 RSS 不穩定已移除；arXiv 用官方 rss.arxiv.org）
 RSS_SOURCES = {
@@ -166,7 +176,11 @@ SYSTEM_PROMPT = """你是一位專精於 AI 領域的台灣資深技術編輯。
 4. 若某項資訊無法從原文確認，明確寫出「（原文未提供，無法確認）」，不可自行補充。
 
 【輸出格式｜嚴格遵守】
-請只輸出 Markdown，依下列三個區塊輸出，不要有多餘前言：
+請只輸出 Markdown，依下列四個區塊輸出，不要有多餘前言：
+
+## 🏷️ 分類
+（從以下選項中，挑選最符合本則資訊的「一個」分類，只輸出分類名稱本身一行，不要加說明：
+模型發布、研究論文、工具與技巧、產業動態、應用案例、一般資訊）
 
 ## 🌐 中文標題
 （將英文標題翻成精準、通順的台灣繁體中文標題，只輸出標題本身一行，不要加引號或來源標註）
@@ -196,13 +210,29 @@ def summarize_with_gemini(source_name, title, url, text):
     resp = model.generate_content(
         user_content,
         generation_config=genai.types.GenerationConfig(
-            temperature=0.2, max_output_tokens=2000))
+            temperature=0.2, max_output_tokens=3000))
     return split_sections(resp.text)
 
 
 def split_sections(md):
-    title_zh, summary, skill = "", md, ""
+    category, title_zh, summary, skill = "一般資訊", "", md, ""
+    m_cat = "## 🏷️ 分類"
     m_title, m_sum, m_skill = "## 🌐 中文標題", "## 💡 核心摘要", "## 🛠️ Skill 模組"
+
+    # 分類
+    if m_cat in md:
+        after = md.split(m_cat, 1)[1]
+        for nxt in (m_title, m_sum, m_skill):
+            if nxt in after:
+                after = after.split(nxt, 1)[0]
+                break
+        lines = [l.strip() for l in after.strip().splitlines() if l.strip()]
+        if lines:
+            raw = lines[0].lstrip("# ").strip()
+            # 比對到合法分類；模型若多寫字，取包含關係
+            category = next((c for c in CATEGORIES if c in raw), "一般資訊")
+
+    # 中文標題
     if m_title in md:
         after = md.split(m_title, 1)[1]
         for nxt in (m_sum, m_skill):
@@ -211,6 +241,8 @@ def split_sections(md):
                 break
         lines = [l.strip() for l in after.strip().splitlines() if l.strip()]
         title_zh = lines[0] if lines else ""
+
+    # 摘要 / Skill
     body = md
     if m_sum in body:
         body = body.split(m_sum, 1)[1]
@@ -219,7 +251,7 @@ def split_sections(md):
         summary, skill = head.strip(), tail.strip()
     else:
         summary = body.strip()
-    return title_zh, summary, skill
+    return category, title_zh, summary, skill
 
 
 def run():
@@ -264,13 +296,13 @@ def run():
     done = 0
     for source_name, it in todo:
         try:
-            title_zh, summary_md, skill_md = summarize_with_gemini(
+            category, title_zh, summary_md, skill_md = summarize_with_gemini(
                 source_name, it["title"], it["link"], it["text"])
             pub_date = it.get("pub_date") or today
             db.save_report(today, pub_date, source_name, it["title"],
-                           title_zh, it["link"], summary_md, skill_md)
+                           title_zh, it["link"], summary_md, skill_md, category)
             done += 1
-            print(f"  ✔ [{pub_date}] {source_name} - {it['title'][:36]}")
+            print(f"  ✔ [{pub_date}|{category}] {source_name} - {it['title'][:32]}")
             time.sleep(SLEEP_SECONDS)
         except Exception as e:
             msg = str(e)
