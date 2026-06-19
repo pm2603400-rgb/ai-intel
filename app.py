@@ -5,12 +5,22 @@ import db
 st.set_page_config(page_title="AI 科技情報與 Skill 知識庫",
                    page_icon="🧠", layout="wide")
 
+# 各分類的徽章顏色
+CAT_COLORS = {
+    "模型發布":   ("#fef3c7", "#b45309"),
+    "研究論文":   ("#dbeafe", "#1d4ed8"),
+    "工具與技巧": ("#dcfce7", "#15803d"),
+    "產業動態":   ("#fce7f3", "#be185d"),
+    "應用案例":   ("#ede9fe", "#6d28d9"),
+    "一般資訊":   ("#f3f4f6", "#6b7280"),
+}
+
 st.markdown("""
 <style>
 .report-card { background:#fff; border:1px solid #e6e6e6; border-radius:14px;
     padding:22px 26px; margin-bottom:22px; box-shadow:0 2px 10px rgba(0,0,0,0.04); }
 .badge-row { margin-bottom:8px; }
-.source-badge,.skill-badge,.date-badge { display:inline-block; font-size:13px;
+.source-badge,.skill-badge,.date-badge,.cat-badge { display:inline-block; font-size:13px;
     font-weight:600; padding:4px 12px; border-radius:999px; margin-right:6px; }
 .source-badge { background:#eef2ff; color:#4338ca; }
 .date-badge { background:#f1f5f9; color:#475569; }
@@ -30,13 +40,22 @@ def has_skill(r):
     return bool(s.strip()) and "一般性資訊" not in s
 
 
+def cat_badge(category):
+    cat = category or "一般資訊"
+    bg, fg = CAT_COLORS.get(cat, CAT_COLORS["一般資訊"])
+    return (f'<span class="cat-badge" style="background:{bg};color:{fg}">'
+            f'🏷️ {cat}</span>')
+
+
 def render_card(r):
     st.markdown('<div class="report-card">', unsafe_allow_html=True)
     skill_badge = ('<span class="skill-badge skill-yes">🛠️ 含可操作 Skill</span>'
                    if has_skill(r)
                    else '<span class="skill-badge skill-no">📄 一般資訊</span>')
     pub = r["pub_date"] or r["run_date"]
+    cat = r["category"] if "category" in r.keys() else None
     st.markdown(f'<div class="badge-row">'
+                f'{cat_badge(cat)}'
                 f'<span class="source-badge">📰 {r["source"]}</span>'
                 f'<span class="date-badge">🗓️ 發布 {pub}</span>'
                 f'{skill_badge}</div>', unsafe_allow_html=True)
@@ -57,7 +76,9 @@ def build_skill_export(rows, suffix):
              f"> 匯出時間：{datetime.datetime.now():%Y-%m-%d %H:%M}　|　共 {len(rows)} 則\n"]
     for r in rows:
         zh = f"（{r['title_zh']}）" if r["title_zh"] else ""
-        lines.append(f"\n## {r['source']}｜{r['title']} {zh}")
+        cat = r["category"] if "category" in r.keys() and r["category"] else ""
+        tag = f"[{cat}] " if cat else ""
+        lines.append(f"\n## {tag}{r['source']}｜{r['title']} {zh}")
         meta = f"> 🗓️ 發布 {r['pub_date'] or r['run_date']}"
         if r["source_url"]:
             meta += f"　|　🔗 {r['source_url']}"
@@ -76,8 +97,9 @@ if not db.list_run_dates():
     st.info("目前資料庫為空，請先執行 `python fetch_and_summarize.py` 抓取資料。")
     st.stop()
 
-keyword = st.sidebar.text_input("🔍 關鍵字搜尋", placeholder="中英標題 / 摘要 / Skill")
+keyword = st.sidebar.text_input("🔍 關鍵字搜尋", placeholder="中英標題 / 摘要 / Skill / 分類")
 st.sidebar.markdown("---")
+sel_cat = st.sidebar.selectbox("🏷️ 文章類型", ["全部"] + db.list_categories())
 sel_pub = st.sidebar.selectbox("🗓️ 發布日期", ["全部"] + pub_dates)
 sel_source = st.sidebar.selectbox("📡 情報來源", ["全部"] + db.list_sources())
 only_skill = st.sidebar.checkbox("只看含 Skill 的情報", value=False)
@@ -94,27 +116,27 @@ if keyword.strip():
     if sk:
         st.download_button("📥 匯出搜尋結果的 Skill 全文 (.md)",
                            data=build_skill_export(sk, f"搜尋_{keyword.strip()}"),
-                           file_name=f"skills_search.md", mime="text/markdown")
+                           file_name="skills_search.md", mime="text/markdown")
     st.markdown("---")
     for r in results:
         render_card(r)
     st.stop()
 
 st.title("🧠 AI 科技情報與 Skill 知識庫")
-st.markdown(f"### 🗓️ 發布日：{sel_pub}　|　來源：{sel_source}　（依發布日排序）")
+st.markdown(f"### 🏷️ {sel_cat}　|　🗓️ {sel_pub}　|　📡 {sel_source}　（依發布日排序）")
 
-reports = db.query_reports(
-    pub_date=None if sel_pub == "全部" else sel_pub,
-    source=sel_source)
+_pub = None if sel_pub == "全部" else sel_pub
+_cat = None if sel_cat == "全部" else sel_cat
+reports = db.query_reports(pub_date=_pub, source=sel_source, category=_cat)
 if only_skill:
     reports = [r for r in reports if has_skill(r)]
 
 c1, c2 = st.columns(2)
 with c1:
-    sk = db.query_all_skills(pub_date=None if sel_pub == "全部" else sel_pub, source=sel_source)
+    sk = db.query_all_skills(pub_date=_pub, source=sel_source, category=_cat)
     if sk:
         st.download_button(f"📥 匯出本頁 Skill 全文 (.md)　共 {len(sk)} 則",
-                           data=build_skill_export(sk, sel_pub),
+                           data=build_skill_export(sk, f"{sel_cat}_{sel_pub}"),
                            file_name="skills_page.md", mime="text/markdown")
 with c2:
     allsk = db.query_all_skills()
