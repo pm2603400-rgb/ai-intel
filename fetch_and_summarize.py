@@ -109,7 +109,7 @@ def _arxiv_exact_date(arxiv_id):
     result = None
     try:
         url = f"http://export.arxiv.org/api/query?id_list={arxiv_id}"
-        r = requests.get(url, headers=HEADERS, timeout=20)
+        r = requests.get(url, headers=HEADERS, timeout=10)
         if r.status_code == 200:
             # API 回傳 Atom XML，第一個 <published> 是首次提交日
             m = re.search(r"<published>(\d{4}-\d{2}-\d{2})", r.text)
@@ -150,7 +150,20 @@ def _parse_pub_date(entry, source_name=""):
 
 def fetch_rss(name, url):
     items = []
-    feed = feedparser.parse(url)
+    # 用 requests 帶逾時抓取（避免某來源連線卡死拖垮整體），再交給 feedparser 解析
+    try:
+        r = requests.get(url, headers=HEADERS, timeout=15)
+        if r.status_code != 200:
+            print(f"    （HTTP {r.status_code}，略過）")
+            return items
+        feed = feedparser.parse(r.content)
+    except requests.exceptions.Timeout:
+        print(f"    （逾時 15 秒，略過）")
+        return items
+    except Exception as e:
+        print(f"    （連線錯誤：{str(e)[:50]}，略過）")
+        return items
+
     for entry in feed.entries[:FETCH_PER_SOURCE]:
         summary = entry.get("summary", "")
         text = BeautifulSoup(summary, "lxml").get_text(" ", strip=True)
