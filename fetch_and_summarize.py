@@ -6,14 +6,14 @@ import requests
 import feedparser
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
-import google.generativeai as genai
 
+import config
+import llm
 import db
 
 load_dotenv()
-genai.configure(api_key=os.environ["GEMINI_API_KEY"])
 
-MODEL = "gemini-2.5-flash"  # 完整版 Flash（確定免費、比 flash-lite 聰明）。Pro 已需付費故不用。
+MODEL = config.GEMINI_MODEL  # 模型由 config 控制（日後換院內模型只改 config）
 HEADERS = {"User-Agent": "Mozilla/5.0 (AI-Intel-Bot)"}
 FETCH_PER_SOURCE = 25       # 每來源從 RSS 抓幾篇候選（含舊的，靠增量過濾）
 DAILY_LIMIT = 20            # 每天最多送進 Gemini 幾篇（免費額度上限，用滿）
@@ -46,9 +46,11 @@ PRIORITY_SOURCES = {
     "The Register 🇬🇧": "https://www.theregister.com/headlines.atom",
     # 加拿大（English）
     "BetaKit 🇨🇦": "https://betakit.com/feed/",
+    "The Logic 🇨🇦": "https://thelogic.co/category/news/feed/",
     "CBC Technology 🇨🇦": "https://www.cbc.ca/webfeed/rss/rss-technology",
     # 法國（French）
     "ActuIA 🇫🇷": "https://www.actuia.com/feed/",
+    "FrenchWeb 🇫🇷": "https://www.frenchweb.fr/feed",
     "L'Usine Digitale 🇫🇷": "https://www.usine-digitale.fr/rss",
     # 德國（German）
     "Heise 🇩🇪": "https://www.heise.de/rss/heise-atom.xml",
@@ -239,6 +241,15 @@ SYSTEM_PROMPT = """你是一位專精於 AI 領域的台灣資深技術編輯。
 （將這則資訊轉化為可實際操作的技能 / 方法論，2~4 點。
 若包含程式概念，請用 ```語言 程式碼區塊 ``` 呈現，每點皆含來源標註。
 若該資訊不適合轉成可操作技能，請寫「此則為一般性資訊，暫無可操作 Skill。」）
+
+## 🎯 適用情境
+（列出這個 skill 適合用在哪些情境/任務，3~6 個簡短標籤，每個標籤一行、以「- 」開頭。
+標籤要具體、貼近實際工作情境，例如「- 大量圖片去背」「- 自動產生會議記錄」「- 多語言客服回覆」。）
+
+## 🔧 典型應用方式
+（這是最重要的一欄：用 2~4 句具體描述「實務上可以怎麼用這個 skill 解決問題」。
+重點是幫讀者想到「原來這個能力可以這樣用」，避免只是抽象描述。
+請寫成可直接套用的具體做法，而非泛泛而談。若不適用請寫「暫無典型應用方式」。）
 """
 
 
@@ -253,52 +264,67 @@ def summarize_with_gemini(source_name, title, url, text):
 \"\"\"
 {text}
 \"\"\""""
-    model = genai.GenerativeModel(model_name=MODEL, system_instruction=SYSTEM_PROMPT)
-    resp = model.generate_content(
-        user_content,
-        generation_config=genai.types.GenerationConfig(
-            temperature=0.2, max_output_tokens=3000))
-    return split_sections(resp.text)
+    raw = llm.generate(SYSTEM_PROMPT, user_content)
+    return split_sections(raw)
+
+
+def _section(md, start_marker, end_markers):
+    """擷取某區塊（start_marker 之後、到下一個 end_marker 之前）的內文。"""
+    if start_marker not in md:
+        return ""
+    after = md.split(start_marker, 1)[1]
+    for nxt in end_markers:
+        if nxt in after:
+            after = after.split(nxt, 1)[0]
+            break
+    return after.strip()
 
 
 def split_sections(md):
     category, title_zh, summary, skill = "一般資訊", "", md, ""
+    use_cases, app_patterns = [], ""
     m_cat = "## 🏷️ 分類"
-    m_title, m_sum, m_skill = "## 🌐 中文標題", "## 💡 核心摘要", "## 🛠️ Skill 模組"
+    m_title = "## 🌐 中文標題"
+    m_sum = "## 💡 核心摘要"
+    m_skill = "## 🛠️ Skill 模組"
+    m_uc = "## 🎯 適用情境"
+    m_ap = "## 🔧 典型應用方式"
+    all_after = [m_title, m_sum, m_skill, m_uc, m_ap]
 
     # 分類
-    if m_cat in md:
-        after = md.split(m_cat, 1)[1]
-        for nxt in (m_title, m_sum, m_skill):
-            if nxt in after:
-                after = after.split(nxt, 1)[0]
-                break
-        lines = [l.strip() for l in after.strip().splitlines() if l.strip()]
+    cat_text = _section(md, m_cat, all_after)
+    if cat_text:
+        lines = [l.strip() for l in cat_text.splitlines() if l.strip()]
         if lines:
             raw = lines[0].lstrip("# ").strip()
-            # 比對到合法分類；模型若多寫字，取包含關係
             category = next((c for c in CATEGORIES if c in raw), "一般資訊")
 
     # 中文標題
-    if m_title in md:
-        after = md.split(m_title, 1)[1]
-        for nxt in (m_sum, m_skill):
-            if nxt in after:
-                after = after.split(nxt, 1)[0]
-                break
-        lines = [l.strip() for l in after.strip().splitlines() if l.strip()]
+    title_text = _section(md, m_title, [m_sum, m_skill, m_uc, m_ap])
+    if title_text:
+        lines = [l.strip() for l in title_text.splitlines() if l.strip()]
         title_zh = lines[0] if lines else ""
 
-    # 摘要 / Skill
-    body = md
-    if m_sum in body:
-        body = body.split(m_sum, 1)[1]
-    if m_skill in body:
-        head, tail = body.split(m_skill, 1)
-        summary, skill = head.strip(), tail.strip()
-    else:
-        summary = body.strip()
-    return category, title_zh, summary, skill
+    # 摘要
+    summary = _section(md, m_sum, [m_skill, m_uc, m_ap]) or summary
+
+    # Skill 模組
+    skill = _section(md, m_skill, [m_uc, m_ap])
+
+    # 適用情境（解析成陣列）
+    uc_text = _section(md, m_uc, [m_ap])
+    if uc_text:
+        for l in uc_text.splitlines():
+            l = l.strip().lstrip("-*・•").strip()
+            if l and "暫無" not in l:
+                use_cases.append(l)
+
+    # 典型應用方式
+    ap_text = _section(md, m_ap, [])
+    if ap_text and "暫無" not in ap_text:
+        app_patterns = ap_text
+
+    return category, title_zh, summary, skill, use_cases, app_patterns
 
 
 def run():
@@ -371,11 +397,13 @@ def run():
     done = 0
     for source_name, it in todo:
         try:
-            category, title_zh, summary_md, skill_md = summarize_with_gemini(
+            (category, title_zh, summary_md, skill_md,
+             use_cases, app_patterns) = summarize_with_gemini(
                 source_name, it["title"], it["link"], it["text"])
             pub_date = it.get("pub_date") or today
             db.save_report(today, pub_date, source_name, it["title"],
-                           title_zh, it["link"], summary_md, skill_md, category)
+                           title_zh, it["link"], summary_md, skill_md, category,
+                           use_cases=use_cases, application_patterns=app_patterns)
             done += 1
             print(f"  ✔ [{pub_date}|{category}] {source_name} - {it['title'][:32]}")
             time.sleep(SLEEP_SECONDS)
