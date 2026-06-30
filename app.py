@@ -132,7 +132,7 @@ if not db.list_run_dates():
 
 page = st.sidebar.radio(
     "功能選單",
-    ["📰 情報瀏覽", "🗂️ 分類瀏覽", "🎯 情境查詢", "🔐 Admin 管理"],
+    ["📰 情報瀏覽", "💡 Skill 靈感庫", "🎯 情境查詢", "🔐 Admin 管理"],
     label_visibility="collapsed")
 st.sidebar.markdown("---")
 
@@ -198,12 +198,11 @@ def page_browse():
         render_card(r)
 
 
-# ════════════════════════ 頁面二：分類瀏覽 ════════════════════════
+# ════════════════════════ 頁面二：Skill 靈感庫 ════════════════════════
 def page_by_category():
-    st.title("🗂️ 分類瀏覽")
-    st.caption("依主分類陳列手邊有哪些可用能力 — 沒有特定問題、想逛逛時用。")
+    st.title("💡 Skill 靈感庫")
+    st.caption("依分類陳列手邊有哪些可用能力 — 沒有特定問題、想逛逛找靈感時用。")
 
-    only_sk = st.sidebar.checkbox("只看含 Skill 的", value=True)
     cats = db.list_categories()
     if not cats:
         st.info("目前還沒有分類資料。")
@@ -211,8 +210,7 @@ def page_by_category():
 
     for cat in cats:
         rows = db.query_reports(category=cat)
-        if only_sk:
-            rows = [r for r in rows if has_skill(r)]
+        rows = [r for r in rows if has_skill(r)]   # 只放有 Skill 的
         if not rows:
             continue
         bg, fg = CAT_COLORS.get(cat, CAT_COLORS["一般資訊"])
@@ -404,7 +402,7 @@ def page_admin():
 # ════════════════════════ 路由 ════════════════════════
 if page == "📰 情報瀏覽":
     page_browse()
-elif page == "🗂️ 分類瀏覽":
+elif page == "💡 Skill 靈感庫":
     page_by_category()
 elif page == "🎯 情境查詢":
     page_situation()
