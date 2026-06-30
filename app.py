@@ -176,7 +176,7 @@ def page_browse():
             results = [r for r in results if has_skill(r)]
         st.caption(f"關鍵字「{keyword.strip()}」共 {len(results)} 則")
         for r in results:
-            render_card(r)
+            render_card(r, show_patterns=False)
         return
 
     st.title("🧠 AI 科技情報與 Skill 知識庫")
@@ -195,7 +195,7 @@ def page_browse():
     st.caption(f"本頁共 {len(reports)} 則情報")
     st.markdown("---")
     for r in reports:
-        render_card(r)
+        render_card(r, show_patterns=False)
 
 
 # ════════════════════════ 頁面二：Skill 靈感庫 ════════════════════════
@@ -203,11 +203,25 @@ def page_by_category():
     st.title("💡 Skill 靈感庫")
     st.caption("依分類陳列手邊有哪些可用能力 — 沒有特定問題、想逛逛找靈感時用。")
 
+    kw = st.text_input("🔍 關鍵字搜尋", placeholder="搜尋標題 / 情境 / 應用方式 / Skill 內容").strip()
+
     cats = db.list_categories()
     if not cats:
         st.info("目前還沒有分類資料。")
         return
 
+    # 有關鍵字 → 跨分類搜尋（不分組，直接列出符合的）
+    if kw:
+        results = [r for r in db.search_reports(kw) if has_skill(r)]
+        st.caption(f"關鍵字「{kw}」共 {len(results)} 則含 Skill 的結果")
+        st.markdown("---")
+        if not results:
+            st.info("找不到符合的 Skill，換個關鍵字試試。")
+        for r in results:
+            render_inspire_card(r)
+        return
+
+    # 無關鍵字 → 依分類陳列
     for cat in cats:
         rows = db.query_reports(category=cat)
         rows = [r for r in rows if has_skill(r)]   # 只放有 Skill 的
