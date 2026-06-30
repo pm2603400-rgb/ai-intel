@@ -2,6 +2,7 @@ import json
 import datetime
 import streamlit as st
 import db
+import config
 
 st.set_page_config(page_title="AI 科技情報與 Skill 知識庫",
                    page_icon="🧠", layout="wide")
@@ -131,9 +132,32 @@ if not db.list_run_dates():
 
 page = st.sidebar.radio(
     "功能選單",
-    ["📰 情報瀏覽", "🗂️ 分類瀏覽", "🎯 情境查詢"],
+    ["📰 情報瀏覽", "🗂️ 分類瀏覽", "🎯 情境查詢", "🔐 Admin 管理"],
     label_visibility="collapsed")
 st.sidebar.markdown("---")
+
+
+def check_password(purpose="此功能"):
+    """密碼驗證。回傳 True 表示通過。用於情境查詢與 Admin。
+    密碼來自 config.ADMIN_PASSWORD（環境變數），未設定時提示。"""
+    if not config.ADMIN_PASSWORD:
+        st.error("尚未設定密碼。請在 Streamlit Secrets 加入 ADMIN_PASSWORD 後即可使用。")
+        st.caption("設定方式：Streamlit 該 app → Settings → Secrets → 加入 "
+                   "`ADMIN_PASSWORD = \"你的密碼\"`")
+        return False
+    # 已驗證過就放行（同一 session）
+    if st.session_state.get("authed"):
+        return True
+    st.markdown(f"#### 🔐 {purpose}需要密碼")
+    pw = st.text_input("請輸入密碼", type="password", key="pw_input")
+    if st.button("確認"):
+        if pw == config.ADMIN_PASSWORD:
+            st.session_state["authed"] = True
+            st.rerun()
+        else:
+            st.error("密碼錯誤")
+    st.caption("此功能會消耗 LLM 額度或可修改資料，故需密碼。情報瀏覽與分類瀏覽無需密碼。")
+    return False
 
 
 # ════════════════════════ 頁面一：情報瀏覽（原本功能）════════════════════════
@@ -238,6 +262,8 @@ def render_inspire_card(r):
 # ════════════════════════ 頁面三：情境查詢 ════════════════════════
 def page_situation():
     st.title("🎯 情境查詢")
+    if not check_password("情境查詢"):
+        return
     st.caption("描述你正在做的任務或遇到的痛點，系統會找出哪些 skill 能套用、並說明「怎麼套」。")
 
     situation = st.text_area(
@@ -282,6 +308,99 @@ def page_situation():
             st.markdown("---")
 
 
+# ════════════════════════ 頁面四：Admin 管理 ════════════════════════
+def page_admin():
+    st.title("🔐 Admin 管理")
+    if not check_password("Admin 管理"):
+        return
+    st.caption("新增 / 編輯 / 刪除 skill，調整分類、情境標籤、應用方式，或用 LLM 重新生成。")
+
+    tab_edit, tab_new = st.tabs(["✏️ 編輯既有", "➕ 新增 skill"])
+
+    # ---- 編輯既有 ----
+    with tab_edit:
+        rows = db.query_reports()
+        if not rows:
+            st.info("目前沒有資料。")
+        else:
+            options = {f"[{(r['category'] or '未分類')}] {(r['title_zh'] or r['title'])[:40]} (id={r['id']})": r['id']
+                       for r in rows}
+            picked = st.selectbox("選擇要編輯的 skill", list(options.keys()))
+            rid = options[picked]
+            r = db.get_report(rid)
+
+            st.markdown(f"**原文標題：** {r['title']}")
+            if r["source_url"]:
+                st.caption(f"🔗 {r['source_url']}")
+
+            # 重新生成按鈕
+            if st.button("🤖 用 LLM 重新生成「分類 / 情境 / 應用方式」（消耗一次額度）"):
+                with st.spinner("生成中…"):
+                    try:
+                        import skill_match
+                        res = skill_match.regenerate_fields(
+                            r["title_zh"] or r["title"], r["skill_md"] or "", r["summary_md"] or "")
+                    except Exception as e:
+                        st.error(f"生成失敗：{e}"); res = None
+                if res:
+                    db.update_skill_fields(rid, category=res["category"],
+                                           use_cases=res["use_cases"],
+                                           application_patterns=res["application_patterns"])
+                    st.success("已重新生成並儲存！下方顯示新內容。")
+                    st.rerun()
+                else:
+                    st.warning("LLM 回傳無法解析，請再試一次。")
+
+            # 編輯欄位
+            cats = ["模型發布", "研究論文", "工具與技巧", "產業動態", "應用案例", "一般資訊"]
+            cur_cat = r["category"] if r["category"] in cats else "一般資訊"
+            new_cat = st.selectbox("🏷️ 分類", cats, index=cats.index(cur_cat))
+
+            cur_uc = get_use_cases(r)
+            new_uc_str = st.text_input("🎯 適用情境標籤（用逗號分隔）",
+                                       value="、".join(cur_uc))
+
+            new_ap = st.text_area("🔧 典型應用方式",
+                                  value=r["application_patterns"] if "application_patterns" in r.keys() and r["application_patterns"] else "",
+                                  height=120)
+            new_title_zh = st.text_input("中文標題", value=r["title_zh"] or "")
+
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("💾 儲存變更", type="primary"):
+                    uc_list = [u.strip() for u in new_uc_str.replace(",", "、").split("、") if u.strip()]
+                    db.update_skill_fields(rid, category=new_cat, use_cases=uc_list,
+                                           application_patterns=new_ap, title_zh=new_title_zh)
+                    st.success("已儲存！")
+                    st.rerun()
+            with col2:
+                if st.button("🗑️ 刪除這則"):
+                    db.delete_report(rid)
+                    st.success("已刪除！")
+                    st.rerun()
+
+    # ---- 新增 ----
+    with tab_new:
+        st.markdown("手動新增一則 skill。")
+        cats = ["模型發布", "研究論文", "工具與技巧", "產業動態", "應用案例", "一般資訊"]
+        n_title = st.text_input("標題", key="n_title")
+        n_cat = st.selectbox("分類", cats, key="n_cat")
+        n_skill = st.text_area("Skill 模組內容", height=140, key="n_skill")
+        n_summary = st.text_area("核心摘要（選填）", height=80, key="n_summary")
+        n_uc = st.text_input("適用情境標籤（逗號分隔，選填）", key="n_uc")
+        n_ap = st.text_area("典型應用方式（選填）", height=100, key="n_ap")
+        n_url = st.text_input("來源連結（選填）", key="n_url")
+        if st.button("➕ 新增", type="primary"):
+            if not n_title.strip():
+                st.warning("請至少填標題。")
+            else:
+                uc_list = [u.strip() for u in n_uc.replace(",", "、").split("、") if u.strip()]
+                db.insert_manual_skill(n_title.strip(), n_title.strip(), n_cat,
+                                       n_skill, n_summary, uc_list, n_ap, n_url.strip())
+                st.success("已新增！")
+                st.rerun()
+
+
 # ════════════════════════ 路由 ════════════════════════
 if page == "📰 情報瀏覽":
     page_browse()
@@ -289,3 +408,5 @@ elif page == "🗂️ 分類瀏覽":
     page_by_category()
 elif page == "🎯 情境查詢":
     page_situation()
+elif page == "🔐 Admin 管理":
+    page_admin()
