@@ -19,6 +19,7 @@ FETCH_PER_SOURCE = 25       # 每來源從 RSS 抓幾篇候選（含舊的，靠
 DAILY_LIMIT = 20            # 每天最多送進 Gemini 幾篇（免費額度上限，用滿）
 ARXIV_DAILY_CAP = 6         # arXiv 系列每天最多處理幾篇（避免論文海吃光額度，其餘讓給各國媒體）
 TEXT_LIMIT = 6000
+MIN_TEXT_LEN = 200          # RSS 內文若少於此字數，嘗試抓原文全文；仍不足則跳過該篇
 SLEEP_SECONDS = 5           # 每篇間隔（避開每分鐘限制）
 
 # 文章分類（Gemini 會從中擇一標註；網站可依此篩選）
@@ -150,6 +151,28 @@ def _parse_pub_date(entry, source_name=""):
     return None
 
 
+def fetch_fulltext(url):
+    """RSS 內文太短時，抓原文網頁正文。失敗回空字串。"""
+    if not url:
+        return ""
+    try:
+        r = requests.get(url, headers=HEADERS, timeout=15)
+        if r.status_code != 200:
+            return ""
+        soup = BeautifulSoup(r.text, "lxml")
+        # 移除明顯非正文元素
+        for tag in soup(["script", "style", "nav", "header", "footer", "aside"]):
+            tag.decompose()
+        # 優先抓 <article>，否則抓 <main>，再不然全頁文字
+        node = soup.find("article") or soup.find("main") or soup.body
+        if node is None:
+            return ""
+        text = node.get_text(" ", strip=True)
+        return text[:TEXT_LIMIT]
+    except Exception:
+        return ""
+
+
 def fetch_rss(name, url):
     items = []
     # 用 requests 帶逾時抓取（避免某來源連線卡死拖垮整體），再交給 feedparser 解析
@@ -168,6 +191,12 @@ def fetch_rss(name, url):
 
     for entry in feed.entries[:FETCH_PER_SOURCE]:
         summary = entry.get("summary", "")
+        # 部分 RSS 有 content 欄位更完整，優先用
+        if entry.get("content"):
+            try:
+                summary = entry["content"][0].get("value", summary)
+            except Exception:
+                pass
         text = BeautifulSoup(summary, "lxml").get_text(" ", strip=True)
         items.append({
             "title": entry.get("title", "(無標題)").strip(),
@@ -395,7 +424,17 @@ def run():
         print(f"（還有 {remaining} 篇新文章，下次自動接續處理）\n")
 
     done = 0
+    skipped = 0
     for source_name, it in todo:
+        # 內文太短 → 嘗試抓原文全文；仍不足則跳過（避免空摘要、不浪費額度）
+        if len(it["text"]) < MIN_TEXT_LEN:
+            full = fetch_fulltext(it["link"])
+            if len(full) >= MIN_TEXT_LEN:
+                it["text"] = full
+            else:
+                skipped += 1
+                print(f"  ⊘ 內文不足且抓不到全文，跳過：{it['title'][:32]}")
+                continue
         try:
             (category, title_zh, summary_md, skill_md,
              use_cases, app_patterns) = summarize_with_gemini(
@@ -414,7 +453,7 @@ def run():
                 break
             print(f"  ✘ 失敗 {it['title'][:36]}：{msg[:80]}")
 
-    print(f"\n本次成功處理 {done} 篇。")
+    print(f"\n本次成功處理 {done} 篇" + (f"，跳過 {skipped} 篇（內文不足）。" if skipped else "。"))
     export_markdown(today)
     print("=== 完成 ===")
 
