@@ -34,6 +34,16 @@ st.markdown("""
     border-radius:6px; margin:8px 0; font-size:14px; color:#334155; }
 .match-how { background:#eff6ff; border-left:4px solid #3b82f6; padding:12px 16px;
     border-radius:6px; margin:6px 0; }
+.skill-mini { background:#fff; border:1px solid #e6e6e6; border-radius:12px;
+    padding:16px 20px; margin-bottom:16px; box-shadow:0 1px 6px rgba(0,0,0,0.04); }
+.mini-title { font-size:16px; font-weight:700; color:#1e293b; margin-bottom:4px; }
+.ap-hero { background:linear-gradient(135deg,#eef2ff,#fdf4ff); border:1px solid #ddd6fe;
+    border-radius:10px; padding:14px 18px; margin:10px 0; font-size:15px;
+    color:#4338ca; line-height:1.6; }
+.ap-hero b { color:#6d28d9; }
+.uc-hero { display:inline-block; background:#fef9c3; color:#854d0e; font-size:13px;
+    font-weight:600; padding:3px 12px; border-radius:999px; margin:2px 4px 2px 0; }
+.no-ap { color:#9ca3af; font-size:13px; font-style:italic; margin:8px 0; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -189,16 +199,40 @@ def page_by_category():
             unsafe_allow_html=True)
         with st.expander(f"展開「{cat}」的 {len(rows)} 則", expanded=False):
             for r in rows:
-                title = r["title_zh"] or r["title"]
-                ucs = get_use_cases(r)
-                uc_str = ("　🎯 " + "、".join(ucs)) if ucs else ""
-                st.markdown(f"**{title}**{uc_str}")
-                if "application_patterns" in r.keys() and r["application_patterns"]:
-                    st.markdown(f'<div class="ap-box">🔧 {r["application_patterns"]}</div>',
-                                unsafe_allow_html=True)
-                if r["source_url"]:
-                    st.caption(f"🔗 {r['source_url']}")
-                st.markdown("---")
+                render_inspire_card(r)
+
+
+def render_inspire_card(r):
+    """分類瀏覽用的精簡卡片：標題+連結+可展開 Skill，但「應用情境」最顯眼。"""
+    title = r["title_zh"] or r["title"]
+    st.markdown('<div class="skill-mini">', unsafe_allow_html=True)
+    st.markdown(f'<div class="mini-title">💡 {title}</div>', unsafe_allow_html=True)
+
+    # 情境標籤（顯眼）
+    ucs = get_use_cases(r)
+    if ucs:
+        badges = "".join(f'<span class="uc-hero">🎯 {u}</span>' for u in ucs)
+        st.markdown(f'<div>{badges}</div>', unsafe_allow_html=True)
+
+    # 典型應用方式（最顯眼，啟發核心）
+    ap = r["application_patterns"] if "application_patterns" in r.keys() else ""
+    if ap:
+        st.markdown(
+            f'<div class="ap-hero">🔧 <b>可以這樣用</b><br>{ap}</div>',
+            unsafe_allow_html=True)
+    elif not ucs:
+        # 完全沒有情境資料（多為舊資料）→ 顯示提示
+        st.markdown(
+            '<div class="no-ap">⚠️ 此則尚未生成應用情境（可至 Admin 用 LLM 重新生成）</div>',
+            unsafe_allow_html=True)
+
+    # 原文連結 + 可展開 Skill（精簡放下方）
+    if r["source_url"]:
+        st.markdown(f'<div class="card-link">🔗 {r["source_url"]}</div>',
+                    unsafe_allow_html=True)
+    with st.expander("🛠️ 展開 Skill 模組"):
+        st.markdown(r["skill_md"] or "_（無 Skill 內容）_")
+    st.markdown('</div>', unsafe_allow_html=True)
 
 
 # ════════════════════════ 頁面三：情境查詢 ════════════════════════
