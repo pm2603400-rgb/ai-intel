@@ -128,10 +128,11 @@ def search_reports(keyword):
     kw = f"%{keyword}%"
     sql = ("SELECT * FROM reports WHERE "
            "(title LIKE ? OR title_zh LIKE ? OR summary_md LIKE ? "
-           "OR skill_md LIKE ? OR category LIKE ?)"
+           "OR skill_md LIKE ? OR category LIKE ? "
+           "OR use_cases LIKE ? OR application_patterns LIKE ?)"
            + _ORDER)
     with get_conn() as conn:
-        return conn.execute(sql, [kw, kw, kw, kw, kw]).fetchall()
+        return conn.execute(sql, [kw, kw, kw, kw, kw, kw, kw]).fetchall()
 
 
 def query_all_skills(pub_date=None, source=None, category=None):
