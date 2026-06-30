@@ -1,3 +1,4 @@
+import json
 import datetime
 import streamlit as st
 import db
@@ -5,7 +6,6 @@ import db
 st.set_page_config(page_title="AI 科技情報與 Skill 知識庫",
                    page_icon="🧠", layout="wide")
 
-# 各分類的徽章顏色
 CAT_COLORS = {
     "模型發布":   ("#fef3c7", "#b45309"),
     "研究論文":   ("#dbeafe", "#1d4ed8"),
@@ -20,15 +20,20 @@ st.markdown("""
 .report-card { background:#fff; border:1px solid #e6e6e6; border-radius:14px;
     padding:22px 26px; margin-bottom:22px; box-shadow:0 2px 10px rgba(0,0,0,0.04); }
 .badge-row { margin-bottom:8px; }
-.source-badge,.skill-badge,.date-badge,.cat-badge { display:inline-block; font-size:13px;
-    font-weight:600; padding:4px 12px; border-radius:999px; margin-right:6px; }
+.source-badge,.skill-badge,.date-badge,.cat-badge,.uc-badge { display:inline-block; font-size:13px;
+    font-weight:600; padding:4px 12px; border-radius:999px; margin-right:6px; margin-bottom:4px; }
 .source-badge { background:#eef2ff; color:#4338ca; }
 .date-badge { background:#f1f5f9; color:#475569; }
 .skill-yes { background:#dcfce7; color:#15803d; }
 .skill-no { background:#f3f4f6; color:#6b7280; }
+.uc-badge { background:#fef9c3; color:#854d0e; font-weight:500; }
 .card-title-en { font-size:19px; font-weight:700; margin:4px 0 2px; }
 .card-title-zh { font-size:16px; font-weight:600; color:#374151; margin:0 0 6px; }
 .card-link { font-size:13px; color:#6b7280; word-break:break-all; }
+.ap-box { background:#f8fafc; border-left:4px solid #6366f1; padding:12px 16px;
+    border-radius:6px; margin:8px 0; font-size:14px; color:#334155; }
+.match-how { background:#eff6ff; border-left:4px solid #3b82f6; padding:12px 16px;
+    border-radius:6px; margin:6px 0; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -40,6 +45,13 @@ def has_skill(r):
     return bool(s.strip()) and "一般性資訊" not in s
 
 
+def get_use_cases(r):
+    try:
+        return json.loads(r["use_cases"] or "[]") if "use_cases" in r.keys() else []
+    except Exception:
+        return []
+
+
 def cat_badge(category):
     cat = category or "一般資訊"
     bg, fg = CAT_COLORS.get(cat, CAT_COLORS["一般資訊"])
@@ -47,7 +59,7 @@ def cat_badge(category):
             f'🏷️ {cat}</span>')
 
 
-def render_card(r):
+def render_card(r, show_patterns=True):
     st.markdown('<div class="report-card">', unsafe_allow_html=True)
     skill_badge = ('<span class="skill-badge skill-yes">🛠️ 含可操作 Skill</span>'
                    if has_skill(r)
@@ -64,6 +76,16 @@ def render_card(r):
         st.markdown(f'<div class="card-title-zh">{r["title_zh"]}</div>', unsafe_allow_html=True)
     if r["source_url"]:
         st.markdown(f'<div class="card-link">🔗 {r["source_url"]}</div>', unsafe_allow_html=True)
+
+    ucs = get_use_cases(r)
+    if ucs:
+        badges = "".join(f'<span class="uc-badge">🎯 {u}</span>' for u in ucs)
+        st.markdown(f'<div class="badge-row">{badges}</div>', unsafe_allow_html=True)
+
+    if show_patterns and "application_patterns" in r.keys() and r["application_patterns"]:
+        st.markdown(f'<div class="ap-box">🔧 <b>典型應用方式</b><br>{r["application_patterns"]}</div>',
+                    unsafe_allow_html=True)
+
     st.markdown("#### 💡 核心摘要")
     st.markdown(r["summary_md"] or "_（無摘要）_")
     with st.expander("🛠️ 展開 Skill 模組"):
@@ -88,64 +110,148 @@ def build_skill_export(rows, suffix):
     return "\n".join(lines)
 
 
+# ════════════════════════ 側邊欄 ════════════════════════
 st.sidebar.title("🧠 AI 情報庫")
 st.sidebar.caption("自動化 AI 科技情報與 Skill 知識庫")
 
-pub_dates = db.list_pub_dates()
 if not db.list_run_dates():
     st.title("🧠 AI 科技情報與 Skill 知識庫")
-    st.info("目前資料庫為空，請先執行 `python fetch_and_summarize.py` 抓取資料。")
+    st.info("目前資料庫為空，請先執行抓取。")
     st.stop()
 
-keyword = st.sidebar.text_input("🔍 關鍵字搜尋", placeholder="中英標題 / 摘要 / Skill / 分類")
+page = st.sidebar.radio(
+    "功能選單",
+    ["📰 情報瀏覽", "🗂️ 分類瀏覽", "🎯 情境查詢"],
+    label_visibility="collapsed")
 st.sidebar.markdown("---")
-sel_cat = st.sidebar.selectbox("🏷️ 文章類型", ["全部"] + db.list_categories())
-sel_pub = st.sidebar.selectbox("🗓️ 發布日期", ["全部"] + pub_dates)
-sel_source = st.sidebar.selectbox("📡 情報來源", ["全部"] + db.list_sources())
-only_skill = st.sidebar.checkbox("只看含 Skill 的情報", value=False)
-st.sidebar.markdown("---")
-st.sidebar.caption("增量累積模式：每天只抓新文章，資料永久保留。\n卡片依發布日由新到舊排序。")
 
-if keyword.strip():
-    st.title("🔍 搜尋結果")
-    results = db.search_reports(keyword.strip())
-    if only_skill:
-        results = [r for r in results if has_skill(r)]
-    st.caption(f"關鍵字「{keyword.strip()}」共 {len(results)} 則")
-    sk = [r for r in results if has_skill(r)]
-    if sk:
-        st.download_button("📥 匯出搜尋結果的 Skill 全文 (.md)",
-                           data=build_skill_export(sk, f"搜尋_{keyword.strip()}"),
-                           file_name="skills_search.md", mime="text/markdown")
-    st.markdown("---")
-    for r in results:
-        render_card(r)
-    st.stop()
 
-st.title("🧠 AI 科技情報與 Skill 知識庫")
-st.markdown(f"### 🏷️ {sel_cat}　|　🗓️ {sel_pub}　|　📡 {sel_source}　（依發布日排序）")
+# ════════════════════════ 頁面一：情報瀏覽（原本功能）════════════════════════
+def page_browse():
+    keyword = st.sidebar.text_input("🔍 關鍵字搜尋", placeholder="標題 / 摘要 / Skill / 分類")
+    st.sidebar.markdown("---")
+    sel_cat = st.sidebar.selectbox("🏷️ 文章類型", ["全部"] + db.list_categories())
+    sel_pub = st.sidebar.selectbox("🗓️ 發布日期", ["全部"] + db.list_pub_dates())
+    sel_source = st.sidebar.selectbox("📡 情報來源", ["全部"] + db.list_sources())
+    only_sk = st.sidebar.checkbox("只看含 Skill 的情報", value=False)
 
-_pub = None if sel_pub == "全部" else sel_pub
-_cat = None if sel_cat == "全部" else sel_cat
-reports = db.query_reports(pub_date=_pub, source=sel_source, category=_cat)
-if only_skill:
-    reports = [r for r in reports if has_skill(r)]
+    if keyword.strip():
+        st.title("🔍 搜尋結果")
+        results = db.search_reports(keyword.strip())
+        if only_sk:
+            results = [r for r in results if has_skill(r)]
+        st.caption(f"關鍵字「{keyword.strip()}」共 {len(results)} 則")
+        for r in results:
+            render_card(r)
+        return
 
-c1, c2 = st.columns(2)
-with c1:
-    sk = db.query_all_skills(pub_date=_pub, source=sel_source, category=_cat)
-    if sk:
-        st.download_button(f"📥 匯出本頁 Skill 全文 (.md)　共 {len(sk)} 則",
-                           data=build_skill_export(sk, f"{sel_cat}_{sel_pub}"),
-                           file_name="skills_page.md", mime="text/markdown")
-with c2:
+    st.title("🧠 AI 科技情報與 Skill 知識庫")
+    st.markdown(f"### 🏷️ {sel_cat}　|　🗓️ {sel_pub}　|　📡 {sel_source}")
+    _pub = None if sel_pub == "全部" else sel_pub
+    _cat = None if sel_cat == "全部" else sel_cat
+    reports = db.query_reports(pub_date=_pub, source=sel_source, category=_cat)
+    if only_sk:
+        reports = [r for r in reports if has_skill(r)]
+
     allsk = db.query_all_skills()
     if allsk:
         st.download_button(f"📦 匯出全部 Skill 知識庫 (.md)　共 {len(allsk)} 則",
                            data=build_skill_export(allsk, "全部"),
                            file_name="skills_all.md", mime="text/markdown")
+    st.caption(f"本頁共 {len(reports)} 則情報")
+    st.markdown("---")
+    for r in reports:
+        render_card(r)
 
-st.caption(f"本頁共 {len(reports)} 則情報")
-st.markdown("---")
-for r in reports:
-    render_card(r)
+
+# ════════════════════════ 頁面二：分類瀏覽 ════════════════════════
+def page_by_category():
+    st.title("🗂️ 分類瀏覽")
+    st.caption("依主分類陳列手邊有哪些可用能力 — 沒有特定問題、想逛逛時用。")
+
+    only_sk = st.sidebar.checkbox("只看含 Skill 的", value=True)
+    cats = db.list_categories()
+    if not cats:
+        st.info("目前還沒有分類資料。")
+        return
+
+    for cat in cats:
+        rows = db.query_reports(category=cat)
+        if only_sk:
+            rows = [r for r in rows if has_skill(r)]
+        if not rows:
+            continue
+        bg, fg = CAT_COLORS.get(cat, CAT_COLORS["一般資訊"])
+        st.markdown(
+            f'<h3><span style="background:{bg};color:{fg};padding:4px 14px;'
+            f'border-radius:999px;">🏷️ {cat}</span> '
+            f'<span style="font-size:15px;color:#888;">（{len(rows)} 則）</span></h3>',
+            unsafe_allow_html=True)
+        with st.expander(f"展開「{cat}」的 {len(rows)} 則", expanded=False):
+            for r in rows:
+                title = r["title_zh"] or r["title"]
+                ucs = get_use_cases(r)
+                uc_str = ("　🎯 " + "、".join(ucs)) if ucs else ""
+                st.markdown(f"**{title}**{uc_str}")
+                if "application_patterns" in r.keys() and r["application_patterns"]:
+                    st.markdown(f'<div class="ap-box">🔧 {r["application_patterns"]}</div>',
+                                unsafe_allow_html=True)
+                if r["source_url"]:
+                    st.caption(f"🔗 {r['source_url']}")
+                st.markdown("---")
+
+
+# ════════════════════════ 頁面三：情境查詢 ════════════════════════
+def page_situation():
+    st.title("🎯 情境查詢")
+    st.caption("描述你正在做的任務或遇到的痛點，系統會找出哪些 skill 能套用、並說明「怎麼套」。")
+
+    situation = st.text_area(
+        "我正在做 / 我的痛點是…",
+        placeholder="例如：我要把大量會議錄音整理成逐字稿和重點摘要，但人工聽打太慢了。",
+        height=120)
+
+    if st.button("🔍 找出能用的 Skill", type="primary"):
+        if not situation.strip():
+            st.warning("請先描述你的情境或痛點。")
+            return
+        with st.spinner("分析中…（呼叫 LLM 比對，會消耗一次額度）"):
+            try:
+                import skill_match
+                results = skill_match.find_matching_skills(situation.strip())
+            except Exception as e:
+                st.error(f"查詢失敗：{e}")
+                return
+
+        if not results:
+            st.info("目前知識庫裡找不到明顯適合的 skill。可以換個說法，或之後資料更多再試。")
+            return
+        if results and results[0][0] == "PARSE_ERROR":
+            st.warning("LLM 回傳格式無法解析，以下是原始回應：")
+            st.text(results[0][1])
+            return
+
+        st.success(f"找到 {len(results)} 個可能適用的 Skill：")
+        for row, why, how in results:
+            title = row["title_zh"] or row["title"]
+            cat = row["category"] or ""
+            st.markdown(f"### {title}　{cat_badge(cat)}", unsafe_allow_html=True)
+            if why:
+                st.markdown(f"**為什麼適合：** {why}")
+            if how:
+                st.markdown(f'<div class="match-how">🔧 <b>怎麼套用到你的情境</b><br>{how}</div>',
+                            unsafe_allow_html=True)
+            with st.expander("看這個 Skill 的完整內容"):
+                st.markdown(row["skill_md"] or "_（無內容）_")
+                if row["source_url"]:
+                    st.caption(f"🔗 {row['source_url']}")
+            st.markdown("---")
+
+
+# ════════════════════════ 路由 ════════════════════════
+if page == "📰 情報瀏覽":
+    page_browse()
+elif page == "🗂️ 分類瀏覽":
+    page_by_category()
+elif page == "🎯 情境查詢":
+    page_situation()
