@@ -147,3 +147,67 @@ def query_all_skills(pub_date=None, source=None, category=None):
     sql += _ORDER
     with get_conn() as conn:
         return conn.execute(sql, params).fetchall()
+
+
+def get_report(report_id):
+    """取單筆（Admin 編輯、重新生成用）。"""
+    with get_conn() as conn:
+        return conn.execute("SELECT * FROM reports WHERE id=?", (report_id,)).fetchone()
+
+
+def all_skills_for_match():
+    """取所有「含可操作 Skill」的精簡欄位，供情境查詢做語意比對。
+    只取比對需要的欄位，減少送進 LLM 的量。"""
+    sql = ("SELECT id, title, title_zh, category, use_cases, "
+           "application_patterns, skill_md, source_url FROM reports "
+           "WHERE skill_md IS NOT NULL AND skill_md != '' "
+           "AND skill_md NOT LIKE '%一般性資訊%'" + _ORDER)
+    with get_conn() as conn:
+        return conn.execute(sql).fetchall()
+
+
+def update_skill_fields(report_id, category=None, use_cases=None,
+                        application_patterns=None, title_zh=None,
+                        summary_md=None, skill_md=None):
+    """更新單筆指定欄位（Admin 編輯 / 重新生成用）。只更新有傳入的欄位。"""
+    import json
+    sets, params = [], []
+    if category is not None:
+        sets.append("category=?"); params.append(category)
+    if use_cases is not None:
+        sets.append("use_cases=?"); params.append(json.dumps(use_cases, ensure_ascii=False))
+    if application_patterns is not None:
+        sets.append("application_patterns=?"); params.append(application_patterns)
+    if title_zh is not None:
+        sets.append("title_zh=?"); params.append(title_zh)
+    if summary_md is not None:
+        sets.append("summary_md=?"); params.append(summary_md)
+    if skill_md is not None:
+        sets.append("skill_md=?"); params.append(skill_md)
+    if not sets:
+        return
+    params.append(report_id)
+    with get_conn() as conn:
+        conn.execute(f"UPDATE reports SET {', '.join(sets)} WHERE id=?", params)
+
+
+def insert_manual_skill(title, title_zh, category, skill_md, summary_md="",
+                        use_cases=None, application_patterns="", source_url=""):
+    """Admin 手動新增一則 skill。"""
+    import json, datetime as _dt
+    today = _dt.date.today().isoformat()
+    uc = json.dumps(use_cases or [], ensure_ascii=False)
+    with get_conn() as conn:
+        conn.execute("""
+            INSERT INTO reports
+            (run_date, pub_date, source, category, title, title_zh,
+             source_url, summary_md, skill_md, use_cases, application_patterns)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?)
+        """, (today, today, "✍️ 手動新增", category, title, title_zh,
+              source_url, summary_md, skill_md, uc, application_patterns))
+
+
+def delete_report(report_id):
+    """Admin 刪除一則。"""
+    with get_conn() as conn:
+        conn.execute("DELETE FROM reports WHERE id=?", (report_id,))
