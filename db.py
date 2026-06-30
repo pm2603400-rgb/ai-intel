@@ -37,6 +37,8 @@ def init_db():
                 source_url  TEXT,
                 summary_md  TEXT,
                 skill_md    TEXT,
+                use_cases            TEXT,
+                application_patterns TEXT,
                 created_at  TEXT DEFAULT (datetime('now','localtime')),
                 UNIQUE(source, title)
             )
@@ -44,6 +46,8 @@ def init_db():
         _ensure_column(conn, "pub_date", "TEXT")
         _ensure_column(conn, "title_zh", "TEXT")
         _ensure_column(conn, "category", "TEXT")
+        _ensure_column(conn, "use_cases", "TEXT")              # JSON 陣列字串：適用情境標籤
+        _ensure_column(conn, "application_patterns", "TEXT")   # 多行文字：典型應用方式
 
 
 def already_have(source, title):
@@ -56,15 +60,18 @@ def already_have(source, title):
 
 
 def save_report(run_date, pub_date, source, title, title_zh,
-                source_url, summary_md, skill_md, category="一般資訊"):
+                source_url, summary_md, skill_md, category="一般資訊",
+                use_cases=None, application_patterns=""):
+    import json
+    uc = json.dumps(use_cases or [], ensure_ascii=False)
     with get_conn() as conn:
         conn.execute("""
             INSERT OR IGNORE INTO reports
             (run_date, pub_date, source, category, title, title_zh,
-             source_url, summary_md, skill_md)
-            VALUES (?,?,?,?,?,?,?,?,?)
+             source_url, summary_md, skill_md, use_cases, application_patterns)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?)
         """, (run_date, pub_date, source, category, title, title_zh,
-              source_url, summary_md, skill_md))
+              source_url, summary_md, skill_md, uc, application_patterns))
 
 
 def list_run_dates():
