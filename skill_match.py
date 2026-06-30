@@ -79,3 +79,36 @@ def find_matching_skills(user_situation, max_candidates=60):
         if row is not None:
             results.append((row, m.get("why", ""), m.get("how", "")))
     return results
+
+
+REGEN_SYSTEM_PROMPT = """你是 AI 工具應用顧問。根據提供的 skill 內容，產生三項分析，幫助使用者想到應用情境。
+一律用台灣繁體中文。只輸出 JSON，不要任何前言或 markdown 圍欄：
+{
+  "category": "從這幾個擇一：模型發布、研究論文、工具與技巧、產業動態、應用案例、一般資訊",
+  "use_cases": ["情境標籤1", "情境標籤2", "情境標籤3"],
+  "application_patterns": "2~4句具體描述實務上可以怎麼用這個 skill 解決問題，要具體可操作，幫讀者想到原來可以這樣用。"
+}"""
+
+
+def regenerate_fields(title, skill_md, summary_md=""):
+    """對單一 skill 重新生成 category / use_cases / application_patterns。
+    回傳 dict 或 None。"""
+    user_content = (f"Skill 標題：{title}\n\n"
+                    f"核心摘要：\n{summary_md}\n\n"
+                    f"Skill 模組內容：\n{skill_md}")
+    raw = llm.generate(REGEN_SYSTEM_PROMPT, user_content,
+                       temperature=0.3, max_tokens=1000)
+    text = raw.strip()
+    if text.startswith("```"):
+        text = text.strip("`")
+        if text.startswith("json"):
+            text = text[4:]
+    try:
+        data = json.loads(text)
+        return {
+            "category": data.get("category", "一般資訊"),
+            "use_cases": data.get("use_cases", []),
+            "application_patterns": data.get("application_patterns", ""),
+        }
+    except Exception:
+        return None
