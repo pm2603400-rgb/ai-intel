@@ -203,30 +203,43 @@ def page_by_category():
     st.title("💡 Skill 靈感庫")
     st.caption("依分類陳列手邊有哪些可用能力 — 沒有特定問題、想逛逛找靈感時用。")
 
-    kw = st.text_input("🔍 關鍵字搜尋", placeholder="搜尋標題 / 情境 / 應用方式 / Skill 內容").strip()
+    # 側欄篩選（日期 + 來源 + 關鍵字；分類靠本頁分組呈現）
+    kw = st.sidebar.text_input("🔍 關鍵字搜尋", placeholder="標題 / 情境 / 應用方式 / Skill").strip()
+    st.sidebar.markdown("---")
+    sel_pub = st.sidebar.selectbox("🗓️ 發布日期", ["全部"] + db.list_pub_dates(), key="insp_pub")
+    sel_source = st.sidebar.selectbox("📡 情報來源", ["全部"] + db.list_sources(), key="insp_src")
+
+    _pub = None if sel_pub == "全部" else sel_pub
+    _src = sel_source  # query_reports 內部會處理「全部」
 
     cats = db.list_categories()
     if not cats:
         st.info("目前還沒有分類資料。")
         return
 
-    # 有關鍵字 → 跨分類搜尋（不分組，直接列出符合的）
+    # 有關鍵字 → 跨分類搜尋（再套用日期/來源篩選）
     if kw:
         results = [r for r in db.search_reports(kw) if has_skill(r)]
+        if _pub:
+            results = [r for r in results if (r["pub_date"] or r["run_date"]) == _pub]
+        if _src != "全部":
+            results = [r for r in results if r["source"] == _src]
         st.caption(f"關鍵字「{kw}」共 {len(results)} 則含 Skill 的結果")
         st.markdown("---")
         if not results:
-            st.info("找不到符合的 Skill，換個關鍵字試試。")
+            st.info("找不到符合的 Skill，換個關鍵字或篩選試試。")
         for r in results:
             render_inspire_card(r)
         return
 
-    # 無關鍵字 → 依分類陳列
+    # 無關鍵字 → 依分類分組（套用日期/來源篩選）
+    any_shown = False
     for cat in cats:
-        rows = db.query_reports(category=cat)
+        rows = db.query_reports(pub_date=_pub, source=_src, category=cat)
         rows = [r for r in rows if has_skill(r)]   # 只放有 Skill 的
         if not rows:
             continue
+        any_shown = True
         bg, fg = CAT_COLORS.get(cat, CAT_COLORS["一般資訊"])
         st.markdown(
             f'<h3><span style="background:{bg};color:{fg};padding:4px 14px;'
@@ -236,6 +249,8 @@ def page_by_category():
         with st.expander(f"展開「{cat}」的 {len(rows)} 則", expanded=False):
             for r in rows:
                 render_inspire_card(r)
+    if not any_shown:
+        st.info("目前的篩選條件下沒有含 Skill 的項目。")
 
 
 def render_inspire_card(r):
@@ -243,6 +258,14 @@ def render_inspire_card(r):
     title = r["title_zh"] or r["title"]
     st.markdown('<div class="skill-mini">', unsafe_allow_html=True)
     st.markdown(f'<div class="mini-title">💡 {title}</div>', unsafe_allow_html=True)
+
+    # 來源 + 發布日期
+    pub = r["pub_date"] or r["run_date"]
+    st.markdown(
+        f'<div style="margin-bottom:6px;">'
+        f'<span class="source-badge">📰 {r["source"]}</span>'
+        f'<span class="date-badge">🗓️ 發布 {pub}</span></div>',
+        unsafe_allow_html=True)
 
     # 情境標籤（顯眼）
     ucs = get_use_cases(r)
