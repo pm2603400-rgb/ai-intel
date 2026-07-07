@@ -43,8 +43,8 @@ PRIORITY_SOURCES = {
     "BAIR (Berkeley) 🇺🇸": "https://bair.berkeley.edu/blog/feed.xml",
     # 英國（English）
     "AI News 🇬🇧": "https://www.artificialintelligence-news.com/feed/",
-    "The Guardian Tech 🇬🇧": "https://www.theguardian.com/uk/technology/rss",
-    "The Register 🇬🇧": "https://www.theregister.com/headlines.atom",
+    "The Guardian AI 🇬🇧": "https://www.theguardian.com/technology/artificialintelligenceai/rss",
+    "The Register AI 🇬🇧": "https://www.theregister.com/software/ai_ml/headlines.atom",
     # 加拿大（English）
     "BetaKit 🇨🇦": "https://betakit.com/feed/",
     "The Logic 🇨🇦": "https://thelogic.co/category/news/feed/",
