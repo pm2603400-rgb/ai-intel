@@ -212,3 +212,12 @@ def delete_report(report_id):
     """Admin 刪除一則。"""
     with get_conn() as conn:
         conn.execute("DELETE FROM reports WHERE id=?", (report_id,))
+
+
+def query_by_date_range(start_date, end_date):
+    """取 pub_date（或 run_date）落在 [start_date, end_date] 內的文章，供週報用。"""
+    sql = ("SELECT * FROM reports WHERE "
+           "COALESCE(pub_date, run_date) >= ? AND COALESCE(pub_date, run_date) <= ?"
+           + _ORDER)
+    with get_conn() as conn:
+        return conn.execute(sql, [start_date, end_date]).fetchall()
