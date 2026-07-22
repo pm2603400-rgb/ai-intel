@@ -37,12 +37,17 @@ def generate_weekly(start_date=None, end_date=None):
     if not rows:
         return {"empty": True, "start": start_date, "end": end_date}
 
-    # 組裝精簡清單給 LLM
+    # 限制資料量：最多取範圍內最新 MAX_ITEMS 則，避免免費方案資源爆量導致 app 重啟
+    MAX_ITEMS = 30
+    truncated = len(rows) > MAX_ITEMS
+    rows = rows[:MAX_ITEMS]
+
+    # 組裝精簡清單給 LLM（摘要只取前 120 字，大幅縮小請求）
     items = []
     id_map = {}
     for r in rows:
         id_map[r["id"]] = r
-        summary = (r["summary_md"] or "")[:300]
+        summary = (r["summary_md"] or "")[:120]
         items.append({
             "id": r["id"],
             "title": r["title_zh"] or r["title"],
@@ -51,19 +56,14 @@ def generate_weekly(start_date=None, end_date=None):
         })
 
     user_content = (f"本週期間：{start_date} ~ {end_date}\n"
-                    f"共 {len(items)} 則情報：\n"
+                    f"以下是 {len(items)} 則情報"
+                    f"{'（已取最新 30 則）' if truncated else ''}：\n"
                     f"{json.dumps(items, ensure_ascii=False)}")
 
     raw = llm.generate(REPORT_SYSTEM_PROMPT, user_content,
-                       temperature=0.3, max_tokens=2500)
-    text = raw.strip()
-    if text.startswith("```"):
-        text = text.strip("`")
-        if text.startswith("json"):
-            text = text[4:]
-    try:
-        data = json.loads(text)
-    except Exception:
+                       temperature=0.3, max_tokens=2000)
+    data = llm.extract_json(raw)
+    if data is None:
         return {"error": True, "raw": raw, "start": start_date, "end": end_date}
 
     # 把 must_read 的 id 對應回完整文章
