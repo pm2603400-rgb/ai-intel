@@ -132,7 +132,7 @@ if not db.list_run_dates():
 
 page = st.sidebar.radio(
     "功能選單",
-    ["📰 情報瀏覽", "💡 Skill 靈感庫", "🎯 情境查詢", "🔐 Admin 管理"],
+    ["📰 情報瀏覽", "💡 Skill 靈感庫", "🎯 情境查詢", "📅 週報", "🔐 Admin 管理"],
     label_visibility="collapsed")
 st.sidebar.markdown("---")
 
@@ -436,6 +436,67 @@ def page_admin():
                 st.rerun()
 
 
+# ════════════════════════ 頁面：週報 ════════════════════════
+def page_weekly():
+    st.title("📅 AI 情報週報")
+    if not check_password("週報生成"):
+        return
+    st.caption("由 LLM 從本週情報中選出必讀重點並歸納主題趨勢（生成會消耗一次額度）。")
+
+    import datetime as _dt
+    today = _dt.date.today()
+    col1, col2 = st.columns(2)
+    with col1:
+        start = st.date_input("起始日", value=today - _dt.timedelta(days=6))
+    with col2:
+        end = st.date_input("結束日", value=today)
+
+    if st.button("📝 生成週報", type="primary"):
+        with st.spinner("分析本週情報中…"):
+            try:
+                import weekly_report
+                rep = weekly_report.generate_weekly(start.isoformat(), end.isoformat())
+            except Exception as e:
+                st.error(f"生成失敗：{e}")
+                return
+        st.session_state["weekly_rep"] = rep
+
+    rep = st.session_state.get("weekly_rep")
+    if not rep:
+        return
+    if rep.get("empty"):
+        st.info(f"{rep['start']} ~ {rep['end']} 期間沒有情報資料。")
+        return
+    if rep.get("error"):
+        st.warning("LLM 回傳格式無法解析，原始回應：")
+        st.text(rep["raw"])
+        return
+
+    st.markdown(f"### 🗓️ {rep['start']} ~ {rep['end']}　共 {rep['total']} 則情報")
+    if rep.get("overview"):
+        st.markdown(f'<div class="ap-hero">📌 <b>本週總覽</b><br>{rep["overview"]}</div>',
+                    unsafe_allow_html=True)
+
+    if rep.get("themes"):
+        st.markdown("## 🔎 本週主題趨勢")
+        for t in rep["themes"]:
+            st.markdown(f"**{t.get('title','')}**　{t.get('insight','')}")
+
+    if rep.get("must_read"):
+        st.markdown("## ⭐ 必讀重點")
+        for row, reason in rep["must_read"]:
+            title = row["title_zh"] or row["title"]
+            cat = row["category"] or ""
+            st.markdown(f"### {title}　{cat_badge(cat)}", unsafe_allow_html=True)
+            if reason:
+                st.markdown(f"**為什麼必讀：** {reason}")
+            with st.expander("看摘要與連結"):
+                st.markdown(row["summary_md"] or "_（無摘要）_")
+                if row["source_url"]:
+                    st.caption(f"🔗 {row['source_url']}")
+            st.markdown("---")
+
+
 # ════════════════════════ 路由 ════════════════════════
 if page == "📰 情報瀏覽":
     page_browse()
@@ -443,5 +504,7 @@ elif page == "💡 Skill 靈感庫":
     page_by_category()
 elif page == "🎯 情境查詢":
     page_situation()
+elif page == "📅 週報":
+    page_weekly()
 elif page == "🔐 Admin 管理":
     page_admin()
