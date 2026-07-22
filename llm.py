@@ -45,3 +45,32 @@ def _openai_compatible(system_prompt, user_content, temperature, max_tokens):
         ],
         temperature=temperature, max_tokens=max_tokens)
     return resp.choices[0].message.content
+
+
+def extract_json(raw):
+    """從 LLM 回應中穩健地抽出 JSON 物件並解析。
+    處理 ```json 圍欄、前後雜訊等情況。失敗回 None。"""
+    import json
+    if not raw:
+        return None
+    text = raw.strip()
+    # 去掉 markdown 圍欄
+    if "```" in text:
+        # 取圍欄內的內容
+        parts = text.split("```")
+        for p in parts:
+            p = p.strip()
+            if p.startswith("json"):
+                p = p[4:].strip()
+            if p.startswith("{") or p.startswith("["):
+                text = p
+                break
+    # 抓第一個 { 到最後一個 }（最穩健）
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        text = text[start:end + 1]
+    try:
+        return json.loads(text)
+    except Exception:
+        return None
