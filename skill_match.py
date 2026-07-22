@@ -60,17 +60,10 @@ def find_matching_skills(user_situation, max_candidates=60):
     raw = llm.generate(MATCH_SYSTEM_PROMPT, user_content,
                        temperature=0.3, max_tokens=2000)
 
-    # 解析 JSON（容錯：去掉可能的 markdown 圍欄）
-    text = raw.strip()
-    if text.startswith("```"):
-        text = text.strip("`")
-        if text.startswith("json"):
-            text = text[4:]
-    try:
-        data = json.loads(text)
-        matches = data.get("matches", [])
-    except Exception:
+    data = llm.extract_json(raw)
+    if data is None:
         return [("PARSE_ERROR", raw, "")]
+    matches = data.get("matches", [])
 
     results = []
     for m in matches:
@@ -98,17 +91,11 @@ def regenerate_fields(title, skill_md, summary_md=""):
                     f"Skill 模組內容：\n{skill_md}")
     raw = llm.generate(REGEN_SYSTEM_PROMPT, user_content,
                        temperature=0.3, max_tokens=1000)
-    text = raw.strip()
-    if text.startswith("```"):
-        text = text.strip("`")
-        if text.startswith("json"):
-            text = text[4:]
-    try:
-        data = json.loads(text)
-        return {
-            "category": data.get("category", "一般資訊"),
-            "use_cases": data.get("use_cases", []),
-            "application_patterns": data.get("application_patterns", ""),
-        }
-    except Exception:
+    data = llm.extract_json(raw)
+    if data is None:
         return None
+    return {
+        "category": data.get("category", "一般資訊"),
+        "use_cases": data.get("use_cases", []),
+        "application_patterns": data.get("application_patterns", ""),
+    }
