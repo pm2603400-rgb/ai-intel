@@ -73,4 +73,24 @@ def extract_json(raw):
     try:
         return json.loads(text)
     except Exception:
-        return None
+        pass
+    # 截斷補救：JSON 可能因 token 上限被切斷，嘗試補上缺少的括號
+    try:
+        snippet = text[start:] if start != -1 else text
+        # 補齊未閉合的引號與括號（粗略但常見有效）
+        fixed = snippet
+        # 移除結尾未完成的部分到最後一個完整的 } 或 ]
+        for cut in range(len(fixed) - 1, 0, -1):
+            if fixed[cut] in "}]":
+                candidate = fixed[:cut + 1]
+                # 補足括號數量
+                opens = candidate.count("{") - candidate.count("}")
+                obr = candidate.count("[") - candidate.count("]")
+                candidate += "]" * max(0, obr) + "}" * max(0, opens)
+                try:
+                    return json.loads(candidate)
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    return None
