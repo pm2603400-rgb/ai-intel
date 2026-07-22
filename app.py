@@ -477,10 +477,29 @@ def page_weekly():
         st.markdown(f'<div class="ap-hero">📌 <b>本週總覽</b><br>{rep["overview"]}</div>',
                     unsafe_allow_html=True)
 
+    # 關鍵洞察（專家視角，最重要）
+    if rep.get("key_insight"):
+        st.markdown(
+            f'<div style="background:linear-gradient(135deg,#fef3c7,#fee2e2);'
+            f'border:1px solid #fca5a5;border-radius:12px;padding:18px 22px;margin:14px 0;">'
+            f'<div style="font-size:17px;font-weight:700;color:#b45309;margin-bottom:6px;">'
+            f'💎 本週關鍵洞察</div>'
+            f'<div style="font-size:15px;color:#7c2d12;line-height:1.7;">{rep["key_insight"]}</div>'
+            f'</div>', unsafe_allow_html=True)
+
     if rep.get("themes"):
         st.markdown("## 🔎 本週主題趨勢")
         for t in rep["themes"]:
-            st.markdown(f"**{t.get('title','')}**　{t.get('insight','')}")
+            st.markdown(f"**{t.get('title','')}**")
+            st.markdown(f"{t.get('insight','')}")
+            st.markdown("")
+
+    # 跨則連結（把散點連成趨勢線）
+    if rep.get("connections"):
+        st.markdown("## 🔗 趨勢連結觀察")
+        for c in rep["connections"]:
+            st.markdown(
+                f'<div class="match-how">🔗 {c}</div>', unsafe_allow_html=True)
 
     if rep.get("must_read"):
         st.markdown("## ⭐ 必讀重點")
