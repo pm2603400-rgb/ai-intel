@@ -444,6 +444,7 @@ def page_weekly():
     st.caption("由 LLM 從本週情報中選出必讀重點並歸納主題趨勢（生成會消耗一次額度）。")
 
     import datetime as _dt
+    import weekly_report
     today = _dt.date.today()
     col1, col2 = st.columns(2)
     with col1:
@@ -451,18 +452,39 @@ def page_weekly():
     with col2:
         end = st.date_input("結束日", value=today)
 
-    if st.button("📝 生成週報", type="primary"):
+    s_iso, e_iso = start.isoformat(), end.isoformat()
+
+    # 範圍變了就清掉 session 裡舊範圍的週報，避免顯示錯誤
+    if st.session_state.get("weekly_range") != (s_iso, e_iso):
+        st.session_state["weekly_range"] = (s_iso, e_iso)
+        st.session_state.pop("weekly_rep", None)
+
+    # 先看這個範圍有沒有存檔
+    saved = weekly_report.load_saved_weekly(s_iso, e_iso)
+
+    colA, colB = st.columns([1, 1])
+    with colA:
+        gen_clicked = st.button(
+            "📝 生成週報" if not saved else "🔄 重新生成（覆蓋存檔）", type="primary")
+    with colB:
+        if saved:
+            st.caption("✅ 此範圍已有存檔，下方直接顯示，不需重新生成。")
+
+    if gen_clicked:
         with st.spinner("分析本週情報中…"):
             try:
-                import weekly_report
-                rep = weekly_report.generate_weekly(start.isoformat(), end.isoformat())
+                rep = weekly_report.generate_weekly(s_iso, e_iso)
             except Exception as e:
                 st.error(f"生成失敗：{e}")
                 return
         st.session_state["weekly_rep"] = rep
+    elif saved:
+        # 沒按生成、但有存檔 → 直接用存檔
+        st.session_state["weekly_rep"] = saved
 
     rep = st.session_state.get("weekly_rep")
     if not rep:
+        st.info("這個範圍還沒有週報，按「生成週報」建立（會消耗一次額度）。")
         return
     if rep.get("empty"):
         st.info(f"{rep['start']} ~ {rep['end']} 期間沒有情報資料。")
@@ -503,16 +525,16 @@ def page_weekly():
 
     if rep.get("must_read"):
         st.markdown("## ⭐ 必讀重點")
-        for row, reason in rep["must_read"]:
-            title = row["title_zh"] or row["title"]
-            cat = row["category"] or ""
+        for m in rep["must_read"]:
+            title = m.get("title", "")
+            cat = m.get("category", "")
             st.markdown(f"### {title}　{cat_badge(cat)}", unsafe_allow_html=True)
-            if reason:
-                st.markdown(f"**為什麼必讀：** {reason}")
+            if m.get("reason"):
+                st.markdown(f"**為什麼必讀：** {m['reason']}")
             with st.expander("看摘要與連結"):
-                st.markdown(row["summary_md"] or "_（無摘要）_")
-                if row["source_url"]:
-                    st.caption(f"🔗 {row['source_url']}")
+                st.markdown(m.get("summary_md") or "_（無摘要）_")
+                if m.get("source_url"):
+                    st.caption(f"🔗 {m['source_url']}")
             st.markdown("---")
 
 
