@@ -79,14 +79,20 @@ def generate_weekly(start_date=None, end_date=None):
     if data is None:
         return {"error": True, "raw": raw, "start": start_date, "end": end_date}
 
-    # 把 must_read 的 id 對應回完整文章
+    # 把 must_read 的 id 對應回完整文章（轉成純 dict 以便儲存）
     must_read = []
     for m in data.get("must_read", []):
         row = id_map.get(m.get("id"))
         if row is not None:
-            must_read.append((row, m.get("reason", "")))
+            must_read.append({
+                "title": row["title_zh"] or row["title"],
+                "category": row["category"] or "",
+                "summary_md": row["summary_md"] or "",
+                "source_url": row["source_url"] or "",
+                "reason": m.get("reason", ""),
+            })
 
-    return {
+    result = {
         "start": start_date,
         "end": end_date,
         "total": len(items),
@@ -96,3 +102,23 @@ def generate_weekly(start_date=None, end_date=None):
         "connections": data.get("connections", []),
         "must_read": must_read,
     }
+
+    # 生成後存檔（避免重複生成浪費額度）
+    try:
+        db.save_digest("weekly", start_date, end_date,
+                       json.dumps(result, ensure_ascii=False))
+    except Exception:
+        pass
+
+    return result
+
+
+def load_saved_weekly(start_date, end_date):
+    """讀已存的週報。沒有回 None。"""
+    row = db.get_digest("weekly", start_date, end_date)
+    if row is None:
+        return None
+    try:
+        return json.loads(row["data_json"])
+    except Exception:
+        return None
