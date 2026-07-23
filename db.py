@@ -221,3 +221,62 @@ def query_by_date_range(start_date, end_date):
            + _ORDER)
     with get_conn() as conn:
         return conn.execute(sql, [start_date, end_date]).fetchall()
+
+
+# ══════════ 週報 / 月報儲存 ══════════
+def init_reports_table():
+    """建立存放已生成週報/月報的表（存 LLM 產出的 JSON，避免重複生成）。"""
+    with get_conn() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS digests (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                kind        TEXT NOT NULL,          -- 'weekly' 或 'monthly'
+                start_date  TEXT NOT NULL,
+                end_date    TEXT NOT NULL,
+                data_json   TEXT NOT NULL,          -- 完整週報內容的 JSON
+                created_at  TEXT DEFAULT (datetime('now','localtime')),
+                UNIQUE(kind, start_date, end_date)
+            )
+        """)
+
+
+def get_digest(kind, start_date, end_date):
+    """取已存的週報/月報。沒有回 None。"""
+    init_reports_table()
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM digests WHERE kind=? AND start_date=? AND end_date=?",
+            (kind, start_date, end_date)).fetchone()
+        return row
+
+
+def save_digest(kind, start_date, end_date, data_json):
+    """存週報/月報（同範圍會覆蓋）。"""
+    init_reports_table()
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO digests (kind, start_date, end_date, data_json) "
+            "VALUES (?,?,?,?)", (kind, start_date, end_date, data_json))
+
+
+def list_digests(kind):
+    """列出某類型已存的所有週報/月報（供選單、月報疊加用），新到舊。"""
+    init_reports_table()
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT id, kind, start_date, end_date, created_at FROM digests "
+            "WHERE kind=? ORDER BY end_date DESC", (kind,)).fetchall()
+
+
+def get_digests_in_range(kind, start_date, end_date):
+    """取某範圍內的所有週報（供月報疊加用）。"""
+    init_reports_table()
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM digests WHERE kind=? AND start_date>=? AND end_date<=? "
+            "ORDER BY end_date ASC", (kind, start_date, end_date)).fetchall()
+
+
+def delete_digest(digest_id):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM digests WHERE id=?", (digest_id,))
