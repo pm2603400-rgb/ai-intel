@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 
 import config
 import llm
-import db
+import supabase_db as db   # 改用 Supabase 版資料存取（資料寫進雲端資料庫）
 
 load_dotenv()
 
@@ -459,26 +459,32 @@ def run():
 
 
 def export_markdown(run_date):
-    from pathlib import Path
-    rows = db.query_reports()
-    if not rows:
-        return
-    out = Path(__file__).parent / "data" / f"{run_date}_news.md"
-    lines = [f"# AI 科技情報（累積）— 匯出於 {run_date}\n"]
-    for r in rows:
-        zh = r["title_zh"] or ""
-        lines.append(f"\n## 📰 {r['source']}｜{r['title']}")
-        if zh:
-            lines.append(f"**{zh}**")
-        if r["pub_date"]:
-            lines.append(f"> 🗓️ 發布日：{r['pub_date']}")
-        if r["source_url"]:
-            lines.append(f"> 🔗 來源連結：{r['source_url']}\n")
-        lines.append(r["summary_md"] or "")
-        lines.append("\n" + (r["skill_md"] or ""))
-        lines.append("\n---")
-    out.write_text("\n".join(lines), encoding="utf-8")
-    print(f"已輸出累積 Markdown：{out}（目前共 {len(rows)} 則）")
+    """匯出累積 Markdown 備份（非必要，失敗不影響抓取主流程）。"""
+    try:
+        from pathlib import Path
+        rows = db.query_reports()
+        if not rows:
+            return
+        out_dir = Path(__file__).parent / "data"
+        out_dir.mkdir(exist_ok=True)
+        out = out_dir / f"{run_date}_news.md"
+        lines = [f"# AI 科技情報（累積）— 匯出於 {run_date}\n"]
+        for r in rows:
+            zh = r.get("title_zh") or ""
+            lines.append(f"\n## 📰 {r.get('source','')}｜{r.get('title','')}")
+            if zh:
+                lines.append(f"**{zh}**")
+            if r.get("pub_date"):
+                lines.append(f"> 🗓️ 發布日：{r['pub_date']}")
+            if r.get("source_url"):
+                lines.append(f"> 🔗 來源連結：{r['source_url']}\n")
+            lines.append(r.get("summary_md") or "")
+            lines.append("\n" + (r.get("skill_md") or ""))
+            lines.append("\n---")
+        out.write_text("\n".join(lines), encoding="utf-8")
+        print(f"已輸出累積 Markdown 備份（目前共 {len(rows)} 則）")
+    except Exception as e:
+        print(f"（Markdown 備份略過：{e}）")
 
 
 if __name__ == "__main__":
