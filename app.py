@@ -7,7 +7,14 @@ import config
 st.set_page_config(page_title="AI 科技情報與 Skill 知識庫",
                    page_icon="🧠", layout="wide")
 
-CAT_COLORS = {
+# ── 主題（可在側欄切換，記在 session）──
+if "theme" not in st.session_state:
+    st.session_state["theme"] = "淺色"
+
+DARK = st.session_state["theme"] == "深色"
+
+# 分類徽章配色（淺色 / 深色兩套）
+CAT_COLORS_LIGHT = {
     "模型發布":   ("#fef3c7", "#b45309"),
     "研究論文":   ("#dbeafe", "#1d4ed8"),
     "工具與技巧": ("#dcfce7", "#15803d"),
@@ -15,36 +22,101 @@ CAT_COLORS = {
     "應用案例":   ("#ede9fe", "#6d28d9"),
     "一般資訊":   ("#f3f4f6", "#6b7280"),
 }
+CAT_COLORS_DARK = {
+    "模型發布":   ("#422006", "#fbbf24"),
+    "研究論文":   ("#172554", "#60a5fa"),
+    "工具與技巧": ("#052e16", "#4ade80"),
+    "產業動態":   ("#500724", "#f472b6"),
+    "應用案例":   ("#2e1065", "#a78bfa"),
+    "一般資訊":   ("#1f2937", "#9ca3af"),
+}
+CAT_COLORS = CAT_COLORS_DARK if DARK else CAT_COLORS_LIGHT
 
-st.markdown("""
+# 主題色票
+if DARK:
+    T = dict(
+        bg="#0b0f14", card="#131a22", card_border="#1f2a37",
+        text="#e5e7eb", text_dim="#9ca3af", title="#f3f4f6",
+        src_bg="#1e293b", src_fg="#93c5fd",
+        date_bg="#1f2937", date_fg="#cbd5e1",
+        skill_yes_bg="#052e16", skill_yes_fg="#4ade80",
+        skill_no_bg="#1f2937", skill_no_fg="#9ca3af",
+        uc_bg="#3f2d00", uc_fg="#fcd34d",
+        ap_bg="#111827", ap_border="#6366f1", ap_text="#c7d2fe",
+        hero_bg="linear-gradient(135deg,#111827,#1e1b4b)", hero_border="#4338ca",
+        hero_text="#c7d2fe", hero_b="#a78bfa",
+        insight_bg="linear-gradient(135deg,#1c1917,#3f2d00)", insight_border="#b45309",
+        insight_title="#fbbf24", insight_text="#fde68a",
+        btn_bg="#131a22", btn_border="#1f2a37", btn_fg="#cbd5e1",
+        btn_active_bg="#1d4ed8", btn_active_fg="#ffffff",
+    )
+else:
+    T = dict(
+        bg="#ffffff", card="#ffffff", card_border="#e6e6e6",
+        text="#334155", text_dim="#6b7280", title="#1e293b",
+        src_bg="#eef2ff", src_fg="#4338ca",
+        date_bg="#f1f5f9", date_fg="#475569",
+        skill_yes_bg="#dcfce7", skill_yes_fg="#15803d",
+        skill_no_bg="#f3f4f6", skill_no_fg="#6b7280",
+        uc_bg="#fef9c3", uc_fg="#854d0e",
+        ap_bg="#f8fafc", ap_border="#6366f1", ap_text="#334155",
+        hero_bg="linear-gradient(135deg,#eef2ff,#fdf4ff)", hero_border="#ddd6fe",
+        hero_text="#4338ca", hero_b="#6d28d9",
+        insight_bg="linear-gradient(135deg,#fef3c7,#fee2e2)", insight_border="#fca5a5",
+        insight_title="#b45309", insight_text="#7c2d12",
+        btn_bg="#ffffff", btn_border="#e5e7eb", btn_fg="#475569",
+        btn_active_bg="#4338ca", btn_active_fg="#ffffff",
+    )
+
+_dark_app_css = f"""
+.stApp {{ background:{T['bg']}; }}
+section[data-testid="stSidebar"] {{ background:{T['card']}; }}
+h1,h2,h3,h4,h5,h6,p,li,span,label {{ color:{T['text']} !important; }}
+.stMarkdown, .stCaption {{ color:{T['text']} !important; }}
+div[data-testid="stExpander"] {{ background:{T['card']}; border-color:{T['card_border']}; }}
+""" if DARK else ""
+
+st.markdown(f"""
 <style>
-.report-card { background:#fff; border:1px solid #e6e6e6; border-radius:14px;
-    padding:22px 26px; margin-bottom:22px; box-shadow:0 2px 10px rgba(0,0,0,0.04); }
-.badge-row { margin-bottom:8px; }
-.source-badge,.skill-badge,.date-badge,.cat-badge,.uc-badge { display:inline-block; font-size:13px;
-    font-weight:600; padding:4px 12px; border-radius:999px; margin-right:6px; margin-bottom:4px; }
-.source-badge { background:#eef2ff; color:#4338ca; }
-.date-badge { background:#f1f5f9; color:#475569; }
-.skill-yes { background:#dcfce7; color:#15803d; }
-.skill-no { background:#f3f4f6; color:#6b7280; }
-.uc-badge { background:#fef9c3; color:#854d0e; font-weight:500; }
-.card-title-en { font-size:19px; font-weight:700; margin:4px 0 2px; }
-.card-title-zh { font-size:16px; font-weight:600; color:#374151; margin:0 0 6px; }
-.card-link { font-size:13px; color:#6b7280; word-break:break-all; }
-.ap-box { background:#f8fafc; border-left:4px solid #6366f1; padding:12px 16px;
-    border-radius:6px; margin:8px 0; font-size:14px; color:#334155; }
-.match-how { background:#eff6ff; border-left:4px solid #3b82f6; padding:12px 16px;
-    border-radius:6px; margin:6px 0; }
-.skill-mini { background:#fff; border:1px solid #e6e6e6; border-radius:12px;
-    padding:16px 20px; margin-bottom:16px; box-shadow:0 1px 6px rgba(0,0,0,0.04); }
-.mini-title { font-size:16px; font-weight:700; color:#1e293b; margin-bottom:4px; }
-.ap-hero { background:linear-gradient(135deg,#eef2ff,#fdf4ff); border:1px solid #ddd6fe;
+{_dark_app_css}
+.report-card {{ background:{T['card']}; border:1px solid {T['card_border']}; border-radius:14px;
+    padding:22px 26px; margin-bottom:22px; box-shadow:0 2px 10px rgba(0,0,0,0.06); }}
+.badge-row {{ margin-bottom:8px; }}
+.source-badge,.skill-badge,.date-badge,.cat-badge,.uc-badge {{ display:inline-block; font-size:13px;
+    font-weight:600; padding:4px 12px; border-radius:999px; margin-right:6px; margin-bottom:4px; }}
+.source-badge {{ background:{T['src_bg']}; color:{T['src_fg']}; }}
+.date-badge {{ background:{T['date_bg']}; color:{T['date_fg']}; }}
+.skill-yes {{ background:{T['skill_yes_bg']}; color:{T['skill_yes_fg']}; }}
+.skill-no {{ background:{T['skill_no_bg']}; color:{T['skill_no_fg']}; }}
+.uc-badge {{ background:{T['uc_bg']}; color:{T['uc_fg']}; font-weight:500; }}
+.card-title-en {{ font-size:19px; font-weight:700; margin:4px 0 2px; color:{T['title']}; }}
+.card-title-zh {{ font-size:16px; font-weight:600; color:{T['text']}; margin:0 0 6px; }}
+.card-link {{ font-size:13px; color:{T['text_dim']}; word-break:break-all; }}
+.ap-box {{ background:{T['ap_bg']}; border-left:4px solid {T['ap_border']}; padding:12px 16px;
+    border-radius:6px; margin:8px 0; font-size:14px; color:{T['ap_text']}; }}
+.match-how {{ background:{T['ap_bg']}; border-left:4px solid {T['ap_border']}; padding:12px 16px;
+    border-radius:6px; margin:6px 0; color:{T['ap_text']}; }}
+.skill-mini {{ background:{T['card']}; border:1px solid {T['card_border']}; border-radius:12px;
+    padding:16px 20px; margin-bottom:16px; box-shadow:0 1px 6px rgba(0,0,0,0.06); }}
+.mini-title {{ font-size:16px; font-weight:700; color:{T['title']}; margin-bottom:4px; }}
+.ap-hero {{ background:{T['hero_bg']}; border:1px solid {T['hero_border']};
     border-radius:10px; padding:14px 18px; margin:10px 0; font-size:15px;
-    color:#4338ca; line-height:1.6; }
-.ap-hero b { color:#6d28d9; }
-.uc-hero { display:inline-block; background:#fef9c3; color:#854d0e; font-size:13px;
-    font-weight:600; padding:3px 12px; border-radius:999px; margin:2px 4px 2px 0; }
-.no-ap { color:#9ca3af; font-size:13px; font-style:italic; margin:8px 0; }
+    color:{T['hero_text']}; line-height:1.6; }}
+.ap-hero b {{ color:{T['hero_b']}; }}
+.uc-hero {{ display:inline-block; background:{T['uc_bg']}; color:{T['uc_fg']}; font-size:13px;
+    font-weight:600; padding:3px 12px; border-radius:999px; margin:2px 4px 2px 0; }}
+.no-ap {{ color:{T['text_dim']}; font-size:13px; font-style:italic; margin:8px 0; }}
+.src-picker-title {{ font-size:14px; font-weight:700; color:{T['text_dim']};
+    margin:0 0 8px; letter-spacing:0.5px; }}
+/* 來源選擇按鈕（Streamlit button 客製） */
+div[data-testid="column"] button {{
+    background:{T['btn_bg']} !important; border:1px solid {T['btn_border']} !important;
+    color:{T['btn_fg']} !important; border-radius:10px !important;
+    font-size:12.5px !important; padding:6px 8px !important; width:100% !important;
+}}
+div[data-testid="column"] button:hover {{
+    border-color:{T['btn_active_bg']} !important; color:{T['btn_active_bg']} !important;
+}}
 </style>
 """, unsafe_allow_html=True)
 
@@ -125,6 +197,15 @@ def build_skill_export(rows, suffix):
 st.sidebar.title("🧠 AI 情報庫")
 st.sidebar.caption("自動化 AI 科技情報與 Skill 知識庫")
 
+# 主題切換
+_theme = st.sidebar.radio("🎨 主題", ["淺色", "深色"],
+                          index=0 if st.session_state["theme"] == "淺色" else 1,
+                          horizontal=True, key="theme_picker")
+if _theme != st.session_state["theme"]:
+    st.session_state["theme"] = _theme
+    st.rerun()
+st.sidebar.markdown("---")
+
 if not db.list_run_dates():
     st.title("🧠 AI 科技情報與 Skill 知識庫")
     st.info("目前資料庫為空，請先執行抓取。")
@@ -160,13 +241,43 @@ def check_password(purpose="此功能"):
     return False
 
 
+def source_picker(key_prefix="browse", per_row=6):
+    """主畫面上方的卡片式來源選擇器（含「全部」）。回傳目前選中的來源。"""
+    state_key = f"sel_source_{key_prefix}"
+    if state_key not in st.session_state:
+        st.session_state[state_key] = "全部"
+
+    sources = ["全部"] + db.list_sources()
+    current = st.session_state[state_key]
+    if current not in sources:
+        current = "全部"
+        st.session_state[state_key] = current
+
+    st.markdown('<div class="src-picker-title">📡 選擇情報來源</div>',
+                unsafe_allow_html=True)
+    # 分列排出按鈕
+    for i in range(0, len(sources), per_row):
+        chunk = sources[i:i + per_row]
+        cols = st.columns(per_row)
+        for j, src in enumerate(chunk):
+            with cols[j]:
+                is_active = (src == current)
+                label = f"● {src}" if is_active else src
+                if st.button(label, key=f"{key_prefix}_src_{i+j}",
+                             use_container_width=True):
+                    st.session_state[state_key] = src
+                    st.rerun()
+    st.caption(f"目前檢視：**{current}**")
+    st.markdown("---")
+    return current
+
+
 # ════════════════════════ 頁面一：情報瀏覽（原本功能）════════════════════════
 def page_browse():
     keyword = st.sidebar.text_input("🔍 關鍵字搜尋", placeholder="標題 / 摘要 / Skill / 分類")
     st.sidebar.markdown("---")
     sel_cat = st.sidebar.selectbox("🏷️ 文章類型", ["全部"] + db.list_categories())
     sel_pub = st.sidebar.selectbox("🗓️ 發布日期", ["全部"] + db.list_pub_dates())
-    sel_source = st.sidebar.selectbox("📡 情報來源", ["全部"] + db.list_sources())
     only_sk = st.sidebar.checkbox("只看含 Skill 的情報", value=False)
 
     if keyword.strip():
@@ -180,7 +291,8 @@ def page_browse():
         return
 
     st.title("🧠 AI 科技情報與 Skill 知識庫")
-    st.markdown(f"### 🏷️ {sel_cat}　|　🗓️ {sel_pub}　|　📡 {sel_source}")
+    sel_source = source_picker("browse")
+    st.markdown(f"##### 🏷️ {sel_cat}　|　🗓️ {sel_pub}　|　📡 {sel_source}")
     _pub = None if sel_pub == "全部" else sel_pub
     _cat = None if sel_cat == "全部" else sel_cat
     reports = db.query_reports(pub_date=_pub, source=sel_source, category=_cat)
@@ -203,12 +315,12 @@ def page_by_category():
     st.title("💡 Skill 靈感庫")
     st.caption("依分類陳列手邊有哪些可用能力 — 沒有特定問題、想逛逛找靈感時用。")
 
-    # 側欄篩選（日期 + 來源 + 關鍵字；分類靠本頁分組呈現）
+    # 側欄篩選（日期 + 關鍵字；來源用主畫面選擇器；分類靠本頁分組呈現）
     kw = st.sidebar.text_input("🔍 關鍵字搜尋", placeholder="標題 / 情境 / 應用方式 / Skill").strip()
     st.sidebar.markdown("---")
     sel_pub = st.sidebar.selectbox("🗓️ 發布日期", ["全部"] + db.list_pub_dates(), key="insp_pub")
-    sel_source = st.sidebar.selectbox("📡 情報來源", ["全部"] + db.list_sources(), key="insp_src")
 
+    sel_source = source_picker("insp")
     _pub = None if sel_pub == "全部" else sel_pub
     _src = sel_source  # query_reports 內部會處理「全部」
 
@@ -512,12 +624,13 @@ def page_weekly():
     # 關鍵洞察（專家視角，最重要）
     if rep.get("key_insight"):
         st.markdown(
-            f'<div style="background:linear-gradient(135deg,#fef3c7,#fee2e2);'
-            f'border:1px solid #fca5a5;border-radius:12px;padding:18px 22px;margin:14px 0;">'
-            f'<div style="font-size:17px;font-weight:700;color:#b45309;margin-bottom:6px;">'
-            f'💎 本週關鍵洞察</div>'
-            f'<div style="font-size:15px;color:#7c2d12;line-height:1.7;">{rep["key_insight"]}</div>'
-            f'</div>', unsafe_allow_html=True)
+            f'<div style="background:{T["insight_bg"]};'
+            f'border:1px solid {T["insight_border"]};border-radius:12px;'
+            f'padding:18px 22px;margin:14px 0;">'
+            f'<div style="font-size:17px;font-weight:700;color:{T["insight_title"]};'
+            f'margin-bottom:6px;">💎 本週關鍵洞察</div>'
+            f'<div style="font-size:15px;color:{T["insight_text"]};line-height:1.7;">'
+            f'{rep["key_insight"]}</div></div>', unsafe_allow_html=True)
 
     if rep.get("themes"):
         st.markdown("## 🔎 本週主題趨勢")
