@@ -441,50 +441,60 @@ def page_weekly():
     st.title("📅 AI 情報週報")
     if not check_password("週報生成"):
         return
-    st.caption("由 LLM 從本週情報中選出必讀重點並歸納主題趨勢（生成會消耗一次額度）。")
 
     import datetime as _dt
     import weekly_report
     today = _dt.date.today()
-    col1, col2 = st.columns(2)
-    with col1:
-        start = st.date_input("起始日", value=today - _dt.timedelta(days=6))
-    with col2:
-        end = st.date_input("結束日", value=today)
 
-    s_iso, e_iso = start.isoformat(), end.isoformat()
+    # ── 已存週報清單 ──
+    st.markdown("### 📚 已存週報")
+    saved_list = db.list_digests("weekly")
+    if saved_list:
+        labels = {f"🗓️ {r['start_date']} ~ {r['end_date']}　(生成於 {r['created_at'][:10]})": r
+                  for r in saved_list}
+        picked = st.selectbox("選擇要查看的週報", ["（不選，我要生成新的）"] + list(labels.keys()))
+        if picked != "（不選，我要生成新的）":
+            chosen = labels[picked]
+            loaded = weekly_report.load_saved_weekly(chosen["start_date"], chosen["end_date"])
+            if loaded:
+                st.session_state["weekly_rep"] = loaded
+                st.session_state["weekly_range"] = (chosen["start_date"], chosen["end_date"])
+    else:
+        st.caption("目前還沒有已存的週報，請於下方生成第一份。")
 
-    # 範圍變了就清掉 session 裡舊範圍的週報，避免顯示錯誤
-    if st.session_state.get("weekly_range") != (s_iso, e_iso):
-        st.session_state["weekly_range"] = (s_iso, e_iso)
-        st.session_state.pop("weekly_rep", None)
+    st.markdown("---")
 
-    # 先看這個範圍有沒有存檔
-    saved = weekly_report.load_saved_weekly(s_iso, e_iso)
+    # ── 生成新週報 ──
+    with st.expander("➕ 生成新週報（選日期範圍，會消耗一次額度）", expanded=not saved_list):
+        col1, col2 = st.columns(2)
+        with col1:
+            start = st.date_input("起始日", value=today - _dt.timedelta(days=6))
+        with col2:
+            end = st.date_input("結束日", value=today)
+        s_iso, e_iso = start.isoformat(), end.isoformat()
 
-    colA, colB = st.columns([1, 1])
-    with colA:
+        exists = weekly_report.load_saved_weekly(s_iso, e_iso) is not None
         gen_clicked = st.button(
-            "📝 生成週報" if not saved else "🔄 重新生成（覆蓋存檔）", type="primary")
-    with colB:
-        if saved:
-            st.caption("✅ 此範圍已有存檔，下方直接顯示，不需重新生成。")
+            "📝 生成週報" if not exists else "🔄 重新生成（覆蓋存檔）", type="primary")
+        if exists:
+            st.caption("✅ 此範圍已有存檔（可在上方清單選取查看）。")
 
-    if gen_clicked:
-        with st.spinner("分析本週情報中…"):
-            try:
-                rep = weekly_report.generate_weekly(s_iso, e_iso)
-            except Exception as e:
-                st.error(f"生成失敗：{e}")
-                return
-        st.session_state["weekly_rep"] = rep
-    elif saved:
-        # 沒按生成、但有存檔 → 直接用存檔
-        st.session_state["weekly_rep"] = saved
+        if gen_clicked:
+            with st.spinner("分析本週情報中…"):
+                try:
+                    rep = weekly_report.generate_weekly(s_iso, e_iso)
+                except Exception as e:
+                    st.error(f"生成失敗：{e}")
+                    return
+            st.session_state["weekly_rep"] = rep
+            st.session_state["weekly_range"] = (s_iso, e_iso)
+            st.rerun()
+
+    st.markdown("---")
 
     rep = st.session_state.get("weekly_rep")
     if not rep:
-        st.info("這個範圍還沒有週報，按「生成週報」建立（會消耗一次額度）。")
+        st.info("從上方選一份已存週報查看，或生成新的。")
         return
     if rep.get("empty"):
         st.info(f"{rep['start']} ~ {rep['end']} 期間沒有情報資料。")
