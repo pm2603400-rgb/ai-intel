@@ -4,13 +4,23 @@
 
 環境變數（GitHub Actions secrets）：
   GEMINI_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_KEY
+
+選用環境變數：
+  WEEK_END_OVERRIDE  指定「該週的週日日期」(YYYY-MM-DD)，用來補跑舊週報。
+                     不設定時，自動取「上一個完整的週一~週日」。
+
+【重要｜首次部署前請先在 Supabase SQL Editor 執行一次】
+  ALTER TABLE digests
+    ADD CONSTRAINT digests_uniq UNIQUE (kind, start_date, end_date);
+  沒有這個 UNIQUE 約束，merge-duplicates 不會生效，
+  重複觸發會一直新增資料列，前端週報清單就會出現重複日期。
 """
 import os
 import json
 import datetime
 import requests
 
-import config
+import config  # noqa: F401  （載入 LLM 設定）
 import llm
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
@@ -51,27 +61,42 @@ def _headers(extra=None):
     return h
 
 
+def last_full_week(today=None):
+    """回傳上一個完整週的 (週一, 週日) ISO 日期字串。
+
+    weekday(): 週一=0 … 週日=6
+    不論腳本哪天被觸發，都會取「已結束的那一整週」。
+    """
+    today = today or datetime.date.today()
+    last_sunday = today - datetime.timedelta(days=today.weekday() + 1)
+    last_monday = last_sunday - datetime.timedelta(days=6)
+    return last_monday.isoformat(), last_sunday.isoformat()
+
+
+def resolve_range():
+    """決定本次要生成的週報區間（支援手動補跑）。"""
+    override = os.environ.get("WEEK_END_OVERRIDE", "").strip()
+    if override:
+        try:
+            end = datetime.date.fromisoformat(override)
+        except ValueError:
+            print(f"⚠️ WEEK_END_OVERRIDE 格式錯誤（需 YYYY-MM-DD）：{override}，改用預設區間")
+            return last_full_week()
+        start = end - datetime.timedelta(days=6)
+        return start.isoformat(), end.isoformat()
+    return last_full_week()
+
+
 def fetch_reports_in_range(start_date, end_date):
-    """讀取日期範圍內的情報。"""
-    params = {
-        "select": "id,title,title_zh,category,summary_md,source_url",
-        "or": f"(pub_date.gte.{start_date},pub_date.lte.{end_date})",
-        "pub_date": f"gte.{start_date}",
-        "order": "pub_date.desc",
-        "limit": str(MAX_ITEMS),
-    }
-    # 用 pub_date 範圍過濾（gte + lte）
-    params = {
-        "select": "id,title,title_zh,category,summary_md,source_url",
-        "pub_date": f"gte.{start_date}",
-        "order": "pub_date.desc",
-        "limit": str(MAX_ITEMS),
-    }
+    """讀取 pub_date 落在 [start_date, end_date] 之間的情報。"""
+    url = (
+        f"{REST}/reports"
+        f"?select=id,title,title_zh,category,summary_md,source_url"
+        f"&and=(pub_date.gte.{start_date},pub_date.lte.{end_date})"
+        f"&order=pub_date.desc"
+        f"&limit={MAX_ITEMS}"
+    )
     try:
-        # PostgREST 多條件：pub_date>=start 且 <=end
-        url = (f"{REST}/reports?select=id,title,title_zh,category,summary_md,source_url"
-               f"&pub_date=gte.{start_date}&pub_date=lte.{end_date}"
-               f"&order=pub_date.desc&limit={MAX_ITEMS}")
         r = requests.get(url, headers=_headers(), timeout=TIMEOUT)
         if r.status_code == 200:
             return r.json()
@@ -83,7 +108,11 @@ def fetch_reports_in_range(start_date, end_date):
 
 
 def save_digest(kind, start_date, end_date, data):
-    """存週報進 digests（同範圍覆蓋）。"""
+    """存週報進 digests；同 (kind, start_date, end_date) 會覆蓋而非新增。
+
+    需要 digests 表上有 UNIQUE (kind, start_date, end_date) 約束，
+    且 URL 必須帶 on_conflict，merge-duplicates 才會生效。
+    """
     row = {
         "kind": kind,
         "start_date": start_date,
@@ -91,12 +120,15 @@ def save_digest(kind, start_date, end_date, data):
         "data_json": data,
     }
     headers = _headers({"Prefer": "resolution=merge-duplicates,return=minimal"})
+    url = f"{REST}/digests?on_conflict=kind,start_date,end_date"
     try:
-        r = requests.post(f"{REST}/digests", headers=headers,
-                          json=[row], timeout=TIMEOUT)
+        r = requests.post(url, headers=headers, json=[row], timeout=TIMEOUT)
         if r.status_code in (200, 201, 204):
             return True
-        print(f"存週報失敗 HTTP {r.status_code}: {r.text[:150]}")
+        print(f"存週報失敗 HTTP {r.status_code}: {r.text[:200]}")
+        if r.status_code == 409:
+            print("提示：409 通常代表 digests 表缺少 UNIQUE (kind,start_date,end_date) 約束，"
+                  "請到 Supabase SQL Editor 補建。")
         return False
     except Exception as e:
         print(f"存週報錯誤: {e}")
@@ -108,14 +140,12 @@ def generate():
         print("❌ 缺少 SUPABASE_URL 或 SUPABASE_SERVICE_KEY")
         return
 
-    today = datetime.date.today()
-    end_date = today.isoformat()
-    start_date = (today - datetime.timedelta(days=6)).isoformat()
+    start_date, end_date = resolve_range()
     print(f"生成週報：{start_date} ~ {end_date}")
 
     rows = fetch_reports_in_range(start_date, end_date)
     if not rows:
-        print("本週沒有情報資料，跳過。")
+        print("該週沒有情報資料，跳過。")
         return
     print(f"讀到 {len(rows)} 則情報，送 LLM 分析…")
 
@@ -133,7 +163,7 @@ def generate():
 
     try:
         raw = llm.generate(REPORT_SYSTEM_PROMPT, user_content,
-                          temperature=0.5, max_tokens=4000)
+                           temperature=0.5, max_tokens=4000)
     except Exception as e:
         print(f"LLM 生成失敗: {e}")
         return
