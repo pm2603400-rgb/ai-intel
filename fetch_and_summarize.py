@@ -478,36 +478,39 @@ def run():
         print("=== 完成 ===")
         return
 
-    # 3. 組裝今日處理清單：優先來源全進（在前），arXiv 最多取 ARXIV_DAILY_CAP 篇（在後）
-    #    這樣即使 arXiv 量大，也不會吃光額度、各國媒體一定排得進。
+        # 3. 組裝候選池：優先來源全進（在前），arXiv 最多取 ARXIV_DAILY_CAP 篇（在後）
+    #    重點：DAILY_LIMIT 現在計算的是「成功送進 Gemini 的篇數」，
+    #    被跳過的文章不佔用額度名額，會繼續往下找，直到湊滿或候選池用完。
     bulk_take = new_bulk[:ARXIV_DAILY_CAP]
     ordered = new_priority + bulk_take
-    todo = ordered[:DAILY_LIMIT]
-    n_pri = sum(1 for s, _ in todo if not s.startswith("arXiv"))
-    n_arx = len(todo) - n_pri
-    print(f"今日上限 {DAILY_LIMIT} 篇 → 本次處理 {len(todo)} 篇"
-          f"（優先 {n_pri}、arXiv {n_arx}；arXiv 每日上限 {ARXIV_DAILY_CAP}）。")
-    remaining = total_new - len(todo)
-    if remaining > 0:
-        print(f"（還有 {remaining} 篇新文章，下次自動接續處理）\n")
+    print(f"候選池 {len(ordered)} 篇（優先 {len(new_priority)}、"
+          f"arXiv {len(bulk_take)}）。今日目標成功處理 {DAILY_LIMIT} 篇。\n")
 
     done = 0
-    skipped = 0
-    for source_name, it in todo:
-        # 內文太短 → 嘗試抓原文全文；仍不足則跳過（避免空摘要、不浪費額度）
+    skip_short = 0
+    skip_irrelevant = 0
+    skip_refusal = 0
+    scanned = 0
+
+    for source_name, it in ordered:
+        if done >= DAILY_LIMIT:
+            break
+        scanned += 1
+
+        # 內文太短 → 嘗試抓原文全文；仍不足則跳過（不佔額度名額）
         if len(it["text"]) < MIN_TEXT_LEN:
             full = fetch_fulltext(it["link"])
             if len(full) >= MIN_TEXT_LEN:
                 it["text"] = full
             else:
-                skipped += 1
+                skip_short += 1
                 print(f"  ⊘ 內文不足且抓不到全文，跳過：{it['title'][:32]}")
                 continue
 
-        # 相關性守門：與 AI 無關的文章不送 Gemini，直接跳過（零額度成本）
+        # 相關性守門：與 AI 無關的文章不送 Gemini（零額度成本）
         ok, why = relevance.is_relevant(it["title"], it["text"], it["link"])
         if not ok:
-            skipped += 1
+            skip_irrelevant += 1
             print(f"  ⊘ 不相關（{why}），跳過：{it['title'][:32]}")
             continue
 
@@ -515,18 +518,21 @@ def run():
             (category, title_zh, summary_md, skill_md,
              use_cases, app_patterns) = summarize_with_gemini(
                 source_name, it["title"], it["link"], it["text"])
+
             # Gemini 若回了拒絕說明而非正常摘要，不要存進資料庫
             if relevance.is_refusal(summary_md):
-                skipped += 1
+                skip_refusal += 1
                 print(f"  ⊘ Gemini 拒絕處理，不存檔：{it['title'][:32]}")
                 time.sleep(SLEEP_SECONDS)
                 continue
+
             pub_date = it.get("pub_date") or today
             db.save_report(today, pub_date, source_name, it["title"],
                            title_zh, it["link"], summary_md, skill_md, category,
                            use_cases=use_cases, application_patterns=app_patterns)
             done += 1
-            print(f"  ✔ [{pub_date}|{category}] {source_name} - {it['title'][:32]}")
+            print(f"  ✔ [{done}/{DAILY_LIMIT}][{pub_date}|{category}] "
+                  f"{source_name} - {it['title'][:32]}")
             time.sleep(SLEEP_SECONDS)
         except Exception as e:
             msg = str(e)
@@ -535,7 +541,12 @@ def run():
                 break
             print(f"  ✘ 失敗 {it['title'][:36]}：{msg[:80]}")
 
-    print(f"\n本次成功處理 {done} 篇" + (f"，跳過 {skipped} 篇（內文不足）。" if skipped else "。"))
+    remaining = len(ordered) - scanned
+    print(f"\n本次掃描 {scanned} 篇 → 成功處理 {done} 篇。")
+    print(f"跳過明細：內文不足 {skip_short}、不相關 {skip_irrelevant}、"
+          f"Gemini 拒絕 {skip_refusal}")
+    if remaining > 0:
+        print(f"候選池還剩 {remaining} 篇，下次自動接續處理。")
     export_markdown(today)
     print("=== 完成 ===")
 
