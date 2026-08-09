@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 import config
 import llm
 import supabase_db as db   # 改用 Supabase 版資料存取（資料寫進雲端資料庫）
+import relevance            # 相關性守門（呼叫 Gemini 前先過濾，省額度）
 
 load_dotenv()
 
@@ -461,10 +462,24 @@ def run():
                 skipped += 1
                 print(f"  ⊘ 內文不足且抓不到全文，跳過：{it['title'][:32]}")
                 continue
+
+        # 相關性守門：與 AI 無關的文章不送 Gemini，直接跳過（零額度成本）
+        ok, why = relevance.is_relevant(it["title"], it["text"], it["link"])
+        if not ok:
+            skipped += 1
+            print(f"  ⊘ 不相關（{why}），跳過：{it['title'][:32]}")
+            continue
+
         try:
             (category, title_zh, summary_md, skill_md,
              use_cases, app_patterns) = summarize_with_gemini(
                 source_name, it["title"], it["link"], it["text"])
+            # Gemini 若回了拒絕說明而非正常摘要，不要存進資料庫
+            if relevance.is_refusal(summary_md):
+                skipped += 1
+                print(f"  ⊘ Gemini 拒絕處理，不存檔：{it['title'][:32]}")
+                time.sleep(SLEEP_SECONDS)
+                continue
             pub_date = it.get("pub_date") or today
             db.save_report(today, pub_date, source_name, it["title"],
                            title_zh, it["link"], summary_md, skill_md, category,
