@@ -483,8 +483,23 @@ def run():
     #    被跳過的文章不佔用額度名額，會繼續往下找，直到湊滿或候選池用完。
     bulk_take = new_bulk[:ARXIV_DAILY_CAP]
     ordered = new_priority + bulk_take
+
+    # 依發布日新到舊排序：不論哪個來源，最新的文章一律優先處理。
+    # 沒有發布日的（例如 Anthropic News 走網頁爬取）視為今天，
+    # 因為那類頁面本來就是新的在最上面，不該被排到最後。
+    # 同日期時優先來源排在 arXiv 前面。
+    def _sort_key(pair):
+        src, item = pair
+        d = item.get("pub_date") or today
+        is_priority = 0 if src.startswith("arXiv") else 1
+        return (d, is_priority)
+
+    ordered.sort(key=_sort_key, reverse=True)
+
+    newest = ordered[0][1].get("pub_date") if ordered else "—"
     print(f"候選池 {len(ordered)} 篇（優先 {len(new_priority)}、"
-          f"arXiv {len(bulk_take)}）。今日目標成功處理 {DAILY_LIMIT} 篇。\n")
+          f"arXiv {len(bulk_take)}），已依發布日新到舊排序，最新 {newest}。")
+    print(f"今日目標成功處理 {DAILY_LIMIT} 篇。\n")
 
     done = 0
     skip_short = 0
