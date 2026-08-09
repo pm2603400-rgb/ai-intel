@@ -39,6 +39,10 @@ STRONG_ASCII = [
     "open-source model", "inference cost", "tokenizer", "quantization",
     # 縮寫（詞界比對，安全）
     "ai", "llm", "llms", "agi", "nlp", "rag", "mcp", "gpt", "chatgpt",
+    # 各語系的「人工智慧」縮寫（極重要，缺了整個語系會失效）
+    "ki",      # 德文 Künstliche Intelligenz
+    "ia",      # 義／法／西／葡文 Intelligenza/Intelligence/Inteligencia Artificial
+    "ki-",     # 德文複合詞如 KI-System、KI-Modell（保險起見）
     # 公司／產品／模型名
     "openai", "anthropic", "deepmind", "hugging face", "huggingface",
     "gemini", "claude", "llama", "mistral", "qwen", "deepseek",
@@ -60,9 +64,11 @@ STRONG_OTHER = [
     # 法文
     "intelligence artificielle", "apprentissage automatique",
     "apprentissage profond", "modèle de langage", "réseau de neurones",
-    # 德文
-    "künstliche intelligenz", "maschinelles lernen", "sprachmodell",
-    "neuronales netz", "neuronale netze",
+    # 德文（含變格與常見複合詞）
+    "künstliche intelligenz", "künstlicher intelligenz",
+    "künstlichen intelligenz", "maschinelles lernen", "sprachmodell",
+    "sprachmodelle", "neuronales netz", "neuronale netze",
+    "ki-system", "ki-modell", "ki-tool", "ki-assistent",
     # 義大利文
     "intelligenza artificiale", "apprendimento automatico",
     "modello linguistico", "rete neurale", "reti neurali",
@@ -70,7 +76,7 @@ STRONG_OTHER = [
     "inteligencia artificial", "inteligência artificial",
     # 俄文
     "искусственный интеллект", "машинное обучение", "нейросет",
-    "нейронная сеть", "языковая модель",
+    "нейронная сеть", "языковая модель", "ии",
 ]
 
 # ── 弱關鍵字：只能加分，不能單獨讓文章通過 ──
@@ -93,6 +99,7 @@ URL_BLOCKLIST = [
 TITLE_BLOCKLIST = [
     "recipe", "horoscope", "crossword", "quiz of the",
     "match report", "transfer news", "weather forecast",
+    "anzeige:",            # 德：業配廣告（Golem 大量產出）
     "in edicola",          # 義：雜誌上架公告
     "intervista a",        # 義：人物專訪
     "i migliori",          # 義：「最佳XX推薦」導購文
