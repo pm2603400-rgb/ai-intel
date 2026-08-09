@@ -153,7 +153,7 @@ def _parse_pub_date(entry, source_name=""):
 
 
 def fetch_fulltext(url):
-    """RSS 內文太短時，抓原文網頁正文。失敗回空字串。"""
+    """RSS 內文太短時，抓原文網頁正文。多層後備，失敗回空字串。"""
     if not url:
         return ""
     try:
@@ -161,15 +161,56 @@ def fetch_fulltext(url):
         if r.status_code != 200:
             return ""
         soup = BeautifulSoup(r.text, "lxml")
+
         # 移除明顯非正文元素
-        for tag in soup(["script", "style", "nav", "header", "footer", "aside"]):
+        for tag in soup(["script", "style", "nav", "header", "footer",
+                         "aside", "form", "noscript", "svg"]):
             tag.decompose()
-        # 優先抓 <article>，否則抓 <main>，再不然全頁文字
-        node = soup.find("article") or soup.find("main") or soup.body
-        if node is None:
-            return ""
-        text = node.get_text(" ", strip=True)
-        return text[:TEXT_LIMIT]
+
+        candidates = []
+
+        # 後備 1：語意標籤
+        for sel in ["article", "main"]:
+            node = soup.find(sel)
+            if node:
+                candidates.append(node.get_text(" ", strip=True))
+
+        # 後備 2：常見正文 class / id（涵蓋 DeepMind、各家 CMS）
+        for attr in ["class", "id"]:
+            for kw in ["content", "article", "post", "body", "entry",
+                       "story", "rich-text", "prose", "markdown"]:
+                node = soup.find(attrs={attr: lambda v, k=kw: v and k in " ".join(
+                    v if isinstance(v, list) else [v]).lower()})
+                if node:
+                    candidates.append(node.get_text(" ", strip=True))
+
+        # 後備 3：把所有 <p> 串起來（對 JS 框架渲染的頁面很有效）
+        ps = soup.find_all("p")
+        if ps:
+            candidates.append(" ".join(p.get_text(" ", strip=True) for p in ps))
+
+        # 後備 4：整頁文字
+        if soup.body:
+            candidates.append(soup.body.get_text(" ", strip=True))
+
+        # 取最長的那個（通常就是正文）
+        best = max(candidates, key=len) if candidates else ""
+
+        # 後備 5：仍太短就用 meta description 補（至少讓標題型文章有東西可分析）
+        if len(best) < MIN_TEXT_LEN:
+            metas = []
+            for prop in [("name", "description"),
+                         ("property", "og:description"),
+                         ("name", "twitter:description")]:
+                m = soup.find("meta", attrs={prop[0]: prop[1]})
+                if m and m.get("content"):
+                    metas.append(m["content"].strip())
+            if metas:
+                joined = " ".join(dict.fromkeys(metas))
+                if len(joined) > len(best):
+                    best = joined
+
+        return best[:TEXT_LIMIT]
     except Exception:
         return ""
 
