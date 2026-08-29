@@ -15,7 +15,7 @@ on:
   workflow_dispatch:
     inputs:
       month:
-        description: '補跑指定月份 YYYY-MM（留空＝上一個完整月份）'
+        description: '要生成哪個月份的月報 YYYY-MM（留空＝上一個完整月份）。實際涵蓋範圍以該月的週報為準，因週報是週一到週日，起訖會與月份略有出入'
         required: false
         default: ''
       send_mail:
