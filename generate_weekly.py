@@ -175,16 +175,25 @@ def generate():
 
     try:
         raw = llm.generate(REPORT_SYSTEM_PROMPT, user_content,
-                           temperature=0.5, max_tokens=4000)
+                           temperature=0.5, max_tokens=8000)
     except Exception as e:
         print(f"LLM 生成失敗: {e}")
         return
 
     data = llm.extract_json(raw)
     if data is None:
-        print("LLM 回傳無法解析為 JSON，跳過存檔。")
-        print("原始回應前 300 字:", raw[:300])
+        print("❌ LLM 回傳無法解析為 JSON，跳過存檔。")
+        print(f"   回應總長度：{len(raw or '')} 字")
+        print("   開頭 400 字:", (raw or "")[:400])
+        print("   結尾 400 字:", (raw or "")[-400:])
         return
+
+    # 截斷補救可能只救回部分欄位，這裡明確提示缺了什麼
+    missing = [k for k in ("overview", "key_insight", "themes", "must_read")
+               if not data.get(k)]
+    if missing:
+        print(f"⚠️ 回應可能被截斷，以下欄位缺失或為空：{', '.join(missing)}")
+        print(f"   （回應長度 {len(raw or '')} 字，若經常發生請調高 max_tokens）")
 
     # must_read 的 id 對應回文章資訊
     must_read = []
