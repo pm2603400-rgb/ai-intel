@@ -108,27 +108,39 @@ def fetch_reports_in_range(start_date, end_date):
 
 
 def save_digest(kind, start_date, end_date, data):
-    """存週報進 digests；同 (kind, start_date, end_date) 會覆蓋而非新增。
+    """存週報進 digests。同 (kind, start_date, end_date) 一律覆蓋。
 
-    需要 digests 表上有 UNIQUE (kind, start_date, end_date) 約束，
-    且 URL 必須帶 on_conflict，merge-duplicates 才會生效。
+    做法：先刪除同範圍的舊資料，再寫入新的。
+    這樣不依賴資料表上的 UNIQUE 約束，重跑一定會蓋掉舊版本。
     """
+    # 1) 先刪同範圍舊資料
+    del_url = (f"{REST}/digests?kind=eq.{kind}"
+               f"&start_date=eq.{start_date}&end_date=eq.{end_date}")
+    try:
+        dr = requests.delete(del_url,
+                             headers=_headers({"Prefer": "return=minimal"}),
+                             timeout=TIMEOUT)
+        if dr.status_code in (200, 204):
+            print(f"  已清除同範圍舊版本（{start_date} ~ {end_date}）")
+        else:
+            print(f"  ⚠️ 清除舊版本回應 HTTP {dr.status_code}: {dr.text[:120]}")
+    except Exception as e:
+        print(f"  ⚠️ 清除舊版本失敗（將直接嘗試寫入）：{e}")
+
+    # 2) 寫入新資料
     row = {
         "kind": kind,
         "start_date": start_date,
         "end_date": end_date,
         "data_json": data,
     }
-    headers = _headers({"Prefer": "resolution=merge-duplicates,return=minimal"})
-    url = f"{REST}/digests?on_conflict=kind,start_date,end_date"
     try:
-        r = requests.post(url, headers=headers, json=[row], timeout=TIMEOUT)
+        r = requests.post(f"{REST}/digests",
+                          headers=_headers({"Prefer": "return=minimal"}),
+                          json=[row], timeout=TIMEOUT)
         if r.status_code in (200, 201, 204):
             return True
         print(f"存週報失敗 HTTP {r.status_code}: {r.text[:200]}")
-        if r.status_code == 409:
-            print("提示：409 通常代表 digests 表缺少 UNIQUE (kind,start_date,end_date) 約束，"
-                  "請到 Supabase SQL Editor 補建。")
         return False
     except Exception as e:
         print(f"存週報錯誤: {e}")
