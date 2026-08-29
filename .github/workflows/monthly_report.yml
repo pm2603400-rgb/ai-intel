@@ -1,0 +1,78 @@
+name: Monthly Report and Mail
+
+# 兩個工作：
+#   monthly  每月 1 號生成上個月的月報（疊合當月週報）
+#   mail     生成後寄出；也可單獨手動觸發寄週報
+#
+# 注意：GitHub Actions 連不到院內 SMTP relay。
+#       雲端寄信請用外部 SMTP（例如 Gmail 應用程式密碼）。
+#       院內版改用院內 relay，環境變數換掉即可。
+
+on:
+  schedule:
+    # 每月 1 號 UTC 02:00（台灣時間早上 10 點）
+    - cron: '0 2 1 * *'
+  workflow_dispatch:
+    inputs:
+      month:
+        description: '補跑指定月份 YYYY-MM（留空＝上一個完整月份）'
+        required: false
+        default: ''
+      send_mail:
+        description: '生成後是否寄信'
+        type: choice
+        options: ['yes', 'no']
+        default: 'yes'
+      dry_run:
+        description: '寄信改為預覽模式（不實際寄出）'
+        type: choice
+        options: ['no', 'yes']
+        default: 'no'
+
+jobs:
+  monthly:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Generate monthly report
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          MONTH_OVERRIDE: ${{ github.event.inputs.month }}
+        run: python generate_monthly.py
+
+      - name: Send monthly report by mail
+        if: ${{ github.event.inputs.send_mail != 'no' }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          SMTP_MODE: ${{ secrets.SMTP_MODE }}
+          SITE_URL: https://ai-intel-web-gamma.vercel.app
+          DRY_RUN: ${{ github.event.inputs.dry_run == 'yes' && '1' || '' }}
+        run: python send_digest.py monthly ${{ github.event.inputs.month }}
+
+      - name: Upload preview (dry run only)
+        if: ${{ github.event.inputs.dry_run == 'yes' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-preview
+          path: digest_preview.html
+          if-no-files-found: ignore
