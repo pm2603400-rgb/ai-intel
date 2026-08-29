@@ -179,8 +179,12 @@ def generate():
             "跨則連結": d.get("connections", []),
         })
 
-    user_content = (f"本月期間：{start_date} ~ {end_date}\n"
-                    f"這個月共有 {len(weeks)} 份週報、涵蓋約 {total_items} 則情報。\n"
+    cs = min((w.get("start_date") or "") for w in weeks)
+    ce = max((w.get("end_date") or "") for w in weeks)
+    user_content = (f"本月份：{start_date[:7]}\n"
+                    f"實際涵蓋期間：{cs} ~ {ce}"
+                    f"（週報以週一至週日為單位，故與月份區間略有出入）\n"
+                    f"共有 {len(weeks)} 份週報、涵蓋約 {total_items} 則情報。\n"
                     f"以下是各週週報內容（依時間順序）：\n"
                     f"{json.dumps(packed, ensure_ascii=False)}")
 
@@ -199,9 +203,17 @@ def generate():
         print("   結尾 400 字:", (raw or "")[-400:])
         return
 
+    # 實際涵蓋範圍＝所有週報的最早起日到最晚迄日。
+    # 這通常與月份區間不同：週報以「週一~週日」為單位，跨月的那一週會整週被納入，
+    # 而月底尚未產生週報的日子則不在涵蓋範圍內。前端要顯示這個，避免誤導。
+    covers_start = min((w.get("start_date") or "") for w in weeks)
+    covers_end = max((w.get("end_date") or "") for w in weeks)
+
     result = {
-        "start": start_date,
+        "start": start_date,          # 月份區間（標籤用）
         "end": end_date,
+        "covers_start": covers_start,  # 實際涵蓋（內容真正的範圍）
+        "covers_end": covers_end,
         "weeks": len(weeks),
         "total": total_items,
         "week_ranges": [f"{w.get('start_date')} ~ {w.get('end_date')}" for w in weeks],
@@ -215,6 +227,10 @@ def generate():
     if save_digest("monthly", start_date, end_date, result):
         print(f"✅ 月報已生成並存檔（疊合 {len(weeks)} 份週報、"
               f"{len(result['themes'])} 個主題、{len(result['shifts'])} 條態勢轉變）")
+        print(f"   月份標籤：{start_date} ~ {end_date}")
+        print(f"   實際涵蓋：{covers_start} ~ {covers_end}")
+        if covers_start < start_date or covers_end < end_date:
+            print("   （因週報以週一~週日為單位，實際涵蓋與月份區間不同，屬正常）")
     else:
         print("❌ 月報存檔失敗")
 
