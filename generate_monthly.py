@@ -186,15 +186,17 @@ def generate():
 
     try:
         raw = llm.generate(MONTHLY_SYSTEM_PROMPT, user_content,
-                           temperature=0.5, max_tokens=5000)
+                           temperature=0.5, max_tokens=8000)
     except Exception as e:
         print(f"LLM 生成失敗: {e}")
         return
 
     data = llm.extract_json(raw)
     if data is None:
-        print("LLM 回傳無法解析為 JSON，跳過存檔。")
-        print("原始回應前 300 字:", (raw or "")[:300])
+        print("❌ LLM 回傳無法解析為 JSON，跳過存檔。")
+        print(f"   回應總長度：{len(raw or '')} 字")
+        print("   開頭 400 字:", (raw or "")[:400])
+        print("   結尾 400 字:", (raw or "")[-400:])
         return
 
     result = {
