@@ -96,15 +96,63 @@ URL_BLOCKLIST = [
 ]
 
 # ── 標題黑名單：出現就直接排除 ──
+# 這些是「就算標題有 AI 關鍵字，內容也不是 AI 情報」的類型，
+# 最常見的就是導購、促銷、開箱、業配。例如日文的筆電促銷文標題
+# 常含 Copilot+ PC 或 Ryzen AI，會誤觸強關鍵字。
 TITLE_BLOCKLIST = [
+    # 英文
     "recipe", "horoscope", "crossword", "quiz of the",
     "match report", "transfer news", "weather forecast",
-    "anzeige:",            # 德：業配廣告（Golem 大量產出）
-    "in edicola",          # 義：雜誌上架公告
-    "intervista a",        # 義：人物專訪
-    "i migliori",          # 義：「最佳XX推薦」導購文
-    "la prova del",        # 義：產品開箱
-    "abbonamento",         # 義：訂閱推銷
+    "deal of the day", "best deals", "on sale now",
+    "discount code", "coupon", "black friday",
+    "hands-on review", "unboxing",
+    # 德文
+    "anzeige:",            # 業配廣告（Golem 大量產出）
+    "im angebot",          # 特價中
+    "schnäppchen",         # 便宜貨
+    "im test",             # 產品評測
+    "kaufberatung",        # 購買指南
+    "gewinnspiel",         # 抽獎活動
+    # 義大利文
+    "in edicola",          # 雜誌上架公告
+    "intervista a",        # 人物專訪
+    "i migliori",          # 「最佳XX推薦」導購文
+    "le migliori",         # 同上（陰性複數）
+    "la prova del",        # 產品開箱
+    "abbonamento",         # 訂閱推銷
+    "offerte",             # 優惠
+    "sconto",              # 折扣
+    "recensione",          # 評測
+    # 法文
+    "bon plan",            # 好康／特價
+    "promo",               # 促銷
+    "meilleurs",           # 最佳XX推薦
+    "notre test",          # 我們的評測
+    # 日文（ASCII、ITmedia 的導購文產量大）
+    "お買い得",             # 超划算
+    "特価",                # 特價
+    "セール",              # 拍賣
+    "目玉品",              # 特選商品
+    "円台",                # 「幾萬日圓起」價格導購
+    "値下げ",              # 降價
+    "割引",                # 折扣
+    "クーポン",             # 優惠券
+    "レビュー：",           # 評測（帶冒號的標題型）
+    "実機レビュー",         # 實機評測
+    "プレゼント",           # 贈品活動
+    "ランキング",           # 排行榜導購
+    # 俄文
+    "скидк",              # 折扣（詞幹，涵蓋各種變格）
+    "распродаж",          # 拍賣
+    # 繁中／簡中
+    "開箱",
+    "優惠",
+    "特價",
+    "折扣",
+    "團購",
+    "限時",
+    "省錢",
+    "抽獎",
 ]
 
 # ── 「延伸閱讀／相關文章」的起始標記 ──
@@ -143,12 +191,18 @@ REFUSAL_MARKERS = [
 
 
 def _compile(words):
-    """把拉丁字母關鍵字編成帶詞界的 regex，避免子字串誤判。"""
+    """把拉丁字母關鍵字編成帶詞界的 regex，避免子字串誤判。
+
+    詞界：前後不可以是字母或數字（連字號、空白、標點都算界線）。
+    詞尾允許選擇性的 s / es，否則複數形會漏掉 ——
+    學術論文標題幾乎都用複數（large language models、neural networks），
+    少了這個會整批被誤判為不相關。
+    """
     pats = []
     for w in words:
         esc = re.escape(w)
-        # 詞界：前後不可以是字母或數字（連字號、空白、標點都算界線）
-        pats.append((w, re.compile(r"(?<![a-z0-9])" + esc + r"(?![a-z0-9])", re.I)))
+        pats.append((w, re.compile(
+            r"(?<![a-z0-9])" + esc + r"(?:e?s)?(?![a-z0-9])", re.I)))
     return pats
 
 
