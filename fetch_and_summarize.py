@@ -66,8 +66,8 @@ PRIORITY_SOURCES = {
     # 俄羅斯（Russian）
     "Habr AI 🇷🇺": "https://habr.com/ru/rss/hub/artificial_intelligence/all/",
     "CNews 🇷🇺": "https://www.cnews.ru/inc/rss/news.xml",
-    # 其他官方
-    "Hugging Face Papers 🌐": "https://huggingface.co/papers/feed",
+    # Hugging Face Papers 的 RSS（/papers/feed）一直回 401 已失效，
+    # 改由 generate_papers.py 走官方 JSON API 另外處理。
 }
 
 # ── 大量來源：論文海，放最後處理且設每日上限 ──
@@ -249,26 +249,126 @@ def fetch_rss(name, url):
     return items
 
 
+# ── Anthropic News 爬取（此來源沒有 RSS，只能解析網頁）──
+# Anthropic 新聞列表的卡片把「日期、分類、標題」包在同一個 <a> 裡，
+# 直接取整段文字會變成「Oct 1, 2026 Announcements Barclays scales Claude…」。
+# 解法：先找卡片內的標題元素；找不到再把開頭的日期與分類詞剝掉。
+# 剝下來的日期正好拿來當發布日（以前 HTML 爬取一直抓不到日期）。
+
+_MONTHS = {
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+    "jul": 7, "aug": 8, "sep": 9, "sept": 9, "oct": 10, "nov": 11, "dec": 12,
+}
+_DATE_RE = re.compile(
+    r"\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s+(\d{1,2}),\s*(\d{4})\b",
+    re.I,
+)
+# Anthropic 卡片上常見的分類標籤（出現在標題前面時要剝掉）
+_ANTH_CATEGORIES = [
+    "Customer stories", "Customer Stories", "Societal impacts", "Societal Impacts",
+    "Economic research", "Economic Research", "Case study", "Case Study",
+    "Announcements", "Announcement", "Product", "Policy", "Research",
+    "Interpretability", "Alignment", "Engineering", "Education", "Event",
+    "Events", "Featured", "News",
+]
+
+
+def _parse_anth_date(text):
+    """從文字中抓出第一個英文日期，回傳 YYYY-MM-DD；抓不到回 None。"""
+    m = _DATE_RE.search(text or "")
+    if not m:
+        return None
+    mon = _MONTHS.get(m.group(1).lower()[:3])
+    try:
+        return f"{int(m.group(3)):04d}-{mon:02d}-{int(m.group(2)):02d}" if mon else None
+    except Exception:
+        return None
+
+
+def _clean_anth_title(text):
+    """剝掉標題開頭的日期與分類詞（兩者順序不固定，可能重複出現）。"""
+    t = (text or "").strip()
+    for _ in range(4):
+        before = t
+        t = re.sub(r"^" + _DATE_RE.pattern + r"\s*", "", t, flags=re.I).strip()
+        for cat in sorted(_ANTH_CATEGORIES, key=len, reverse=True):
+            if t.lower().startswith(cat.lower() + " "):
+                t = t[len(cat):].strip()
+                break
+        t = t.lstrip("·|–—-:： ").strip()
+        if t == before:
+            break
+    return t
+
+
+def _anth_title_from_card(a):
+    """優先從卡片內的標題元素取標題，取不到才用整段文字清理。"""
+    for tag in ("h1", "h2", "h3", "h4", "h5"):
+        h = a.find(tag)
+        if h:
+            txt = h.get_text(" ", strip=True)
+            if txt:
+                return txt
+    node = a.find(attrs={"class": lambda v: v and any(
+        k in " ".join(v if isinstance(v, list) else [v]).lower()
+        for k in ("title", "headline", "heading"))})
+    if node:
+        txt = node.get_text(" ", strip=True)
+        if txt:
+            return txt
+    return _clean_anth_title(a.get_text(" ", strip=True))
+
+
+# 同一篇文章在列表頁常有多個連結（卡片本體、「Read more」按鈕），
+# 這些通用字樣不能當標題
+_GENERIC_LINK_TEXT = {
+    "read more", "learn more", "see all", "view all", "more", "read",
+    "read the post", "read the announcement", "continue reading",
+}
+
+
 def fetch_anthropic_news():
     items = []
     try:
         r = requests.get("https://www.anthropic.com/news",
                          headers=HEADERS, timeout=20)
         soup = BeautifulSoup(r.text, "lxml")
-        seen = set()
+
+        # 同一網址可能出現好幾次，保留標題最完整的那一個，並維持首次出現的順序
+        best = {}
+        order = []
         for a in soup.find_all("a", href=True):
-            href = a["href"]
-            if "/news/" not in href:
+            href = a["href"].split("#")[0].split("?")[0]
+            # 只收 /news/<slug> 形式的文章頁，排除列表頁本身與分頁
+            m = re.search(r"/news/([^/]+)/?$", href)
+            if not m or not m.group(1):
                 continue
             full = href if href.startswith("http") else "https://www.anthropic.com" + href
-            title = a.get_text(" ", strip=True)
-            if not title or full in seen:
+
+            raw = a.get_text(" ", strip=True)
+            title = _anth_title_from_card(a)
+            if not title or title.lower() in _GENERIC_LINK_TEXT or len(title) < 8:
                 continue
-            seen.add(full)
-            items.append({"title": title, "link": full,
-                          "text": title, "pub_date": None})
-            if len(items) >= FETCH_PER_SOURCE:
-                break
+
+            date = _parse_anth_date(raw)
+            if full not in best:
+                order.append(full)
+                best[full] = {"title": title, "pub_date": date}
+            else:
+                cur = best[full]
+                if len(title) > len(cur["title"]):
+                    cur["title"] = title
+                if not cur["pub_date"] and date:
+                    cur["pub_date"] = date
+
+        for full in order[:FETCH_PER_SOURCE]:
+            b = best[full]
+            items.append({
+                "title": b["title"],
+                "link": full,
+                "text": b["title"],
+                "pub_date": b["pub_date"],
+            })
     except Exception as e:
         print(f"[Anthropic] 抓取失敗：{e}")
     return items
@@ -551,6 +651,10 @@ def run():
             time.sleep(SLEEP_SECONDS)
         except Exception as e:
             msg = str(e)
+            if "403" in msg or "denied access" in msg.lower():
+                print(f"  ⏹ Gemini 專案被拒絕存取（403），停止本次執行。")
+                print(f"     這是 Google 端的專案權限問題，換用其他專案的 API key 即可。")
+                break
             if "429" in msg or "quota" in msg.lower():
                 print(f"  ⏹ 已達今日 Gemini 額度，停止。剩餘明天接續。")
                 break
