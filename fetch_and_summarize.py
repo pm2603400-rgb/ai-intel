@@ -266,7 +266,8 @@ _DATE_RE = re.compile(
 # Anthropic 卡片上常見的分類標籤（出現在標題前面時要剝掉）
 _ANTH_CATEGORIES = [
     "Customer stories", "Customer Stories", "Societal impacts", "Societal Impacts",
-    "Economic research", "Economic Research", "Case study", "Case Study",
+    "Economic research", "Economic Research", "Economics",
+    "Case study", "Case Study",
     "Announcements", "Announcement", "Product", "Policy", "Research",
     "Interpretability", "Alignment", "Engineering", "Education", "Event",
     "Events", "Featured", "News",
